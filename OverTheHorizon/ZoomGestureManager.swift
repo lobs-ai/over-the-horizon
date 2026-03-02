@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import CoreLocation
 
 /// Manages zoom state from pinch gestures.
 /// Pinch OUT increases min/max distances (zoom out view, see farther, smaller labels).
