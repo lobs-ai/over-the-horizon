@@ -151,6 +151,32 @@ class LocationCategoryTests: XCTestCase {
         XCTAssertFalse(rawValues.contains("cafe"))
         XCTAssertFalse(rawValues.contains("cafe coffee"))
     }
+    
+    func testAllCategoriesHaveMKMappings() {
+        for category in LocationCategory.allCases {
+            if #available(iOS 17.0, *) {
+                let mkCategory = category.mkCategory
+                XCTAssertNotNil(mkCategory)
+            }
+        }
+    }
+    
+    func testCategoryRawValues() {
+        let landmark = LocationCategory.landmark
+        let museum = LocationCategory.museum
+        let park = LocationCategory.park
+        let airport = LocationCategory.airport
+        
+        XCTAssertEqual(landmark.rawValue, "landmark")
+        XCTAssertEqual(museum.rawValue, "museum")
+        XCTAssertEqual(park.rawValue, "park")
+        XCTAssertEqual(airport.rawValue, "airport")
+        
+        // Verify they're all different
+        let allRawValues = LocationCategory.allCases.map { $0.rawValue }
+        let uniqueRawValues = Set(allRawValues)
+        XCTAssertEqual(allRawValues.count, uniqueRawValues.count)
+    }
 }
 
 // MARK: - POILocation Tests
@@ -272,6 +298,55 @@ class POILocationTests: XCTestCase {
         
         XCTAssertEqual(poi.prominence, 0.5) // Default prominence
     }
+    
+    func testCalculateDistanceRealWorldScenario() {
+        // Detroit to Ann Arbor (approximately 40 miles / 64 km)
+        let detroit = CLLocationCoordinate2D(latitude: 42.3314, longitude: -83.0458)
+        let annArbor = CLLocationCoordinate2D(latitude: 42.2808, longitude: -83.7430)
+        
+        let distance = POILocation.calculateDistance(from: detroit, to: annArbor)
+        // Should be approximately 40 miles or 64 km = 64000 meters
+        let expectedDistance = 64000.0
+        let tolerance = 5000.0 // 5 km tolerance
+        
+        XCTAssertLessThan(abs(distance - expectedDistance), tolerance)
+    }
+    
+    func testBearingRangeIsValid() {
+        let userLocation = CLLocationCoordinate2D(latitude: 40.0, longitude: -75.0)
+        
+        // Test multiple bearings
+        for lat in stride(from: 30.0, through: 50.0, by: 5.0) {
+            for lon in stride(from: -85.0, through: -65.0, by: 5.0) {
+                let poiLocation = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                let bearing = POILocation.calculateBearing(from: userLocation, to: poiLocation)
+                
+                XCTAssertGreaterThanOrEqual(bearing, 0.0)
+                XCTAssertLessThan(bearing, 360.0)
+            }
+        }
+    }
+    
+    func testPOILocationIdentifiable() {
+        let poi1 = POILocation(
+            name: "Test1",
+            coordinate: testCoordinate,
+            category: .museum,
+            distance: 100.0,
+            bearing: 45.0
+        )
+        
+        let poi2 = POILocation(
+            name: "Test2",
+            coordinate: testCoordinate,
+            category: .museum,
+            distance: 200.0,
+            bearing: 90.0
+        )
+        
+        // Should have different IDs
+        XCTAssertNotEqual(poi1.id, poi2.id)
+    }
 }
 
 // MARK: - POISearchManager Tests
@@ -319,6 +394,14 @@ class POISearchManagerTests: XCTestCase {
         XCTAssertEqual(sut.searchRadiusMiles, 3.5)
     }
     
+    func testSearchRadiusRangeOfValidValues() {
+        let validRanges = [1.0, 2.5, 5.0, 7.5, 10.0]
+        for range in validRanges {
+            sut.searchRadiusMiles = range
+            XCTAssertEqual(sut.searchRadiusMiles, range)
+        }
+    }
+    
     func testStartAndStopPeriodicSearch() {
         sut.startPeriodicSearch()
         // Allow a moment for the timer to start
@@ -343,5 +426,110 @@ class POISearchManagerTests: XCTestCase {
         manager = nil
         // Should not crash when deallocated
         XCTAssertNil(manager)
+    }
+    
+    func testSearchRadiusMilesValidation() {
+        // Test edge cases
+        sut.searchRadiusMiles = -5.0
+        XCTAssertEqual(sut.searchRadiusMiles, 1.0)
+        
+        sut.searchRadiusMiles = 0.0
+        XCTAssertEqual(sut.searchRadiusMiles, 1.0)
+        
+        sut.searchRadiusMiles = 1.0
+        XCTAssertEqual(sut.searchRadiusMiles, 1.0)
+        
+        sut.searchRadiusMiles = 10.0
+        XCTAssertEqual(sut.searchRadiusMiles, 10.0)
+        
+        sut.searchRadiusMiles = 100.0
+        XCTAssertEqual(sut.searchRadiusMiles, 10.0)
+    }
+    
+    func testInitialSearchState() {
+        XCTAssertTrue(sut.pois.isEmpty)
+        XCTAssertNil(sut.errorMessage)
+        XCTAssertFalse(sut.isSearching)
+    }
+    
+    @MainActor
+    func testSearchWithSpecificCategories() async {
+        // Test searching with specific categories
+        let categories = [LocationCategory.museum, LocationCategory.park]
+        await sut.searchPOIs(for: categories)
+        
+        // Should complete without crashing (may have empty results due to no user location)
+        XCTAssertNotNil(sut)
+    }
+    
+    func testPeriodicSearchLifecycle() {
+        XCTAssertNotNil(sut)
+        
+        sut.startPeriodicSearch()
+        XCTAssertNotNil(sut)
+        
+        sut.stopPeriodicSearch()
+        XCTAssertNotNil(sut)
+        
+        sut.startPeriodicSearch()
+        XCTAssertNotNil(sut)
+        
+        sut.stopPeriodicSearch()
+        XCTAssertNotNil(sut)
+    }
+}
+
+// MARK: - Integration Tests
+
+class POIIntegrationTests: XCTestCase {
+    func testPOILocationCategoryIntegration() {
+        let museum = LocationCategory.museum
+        let coordinate = CLLocationCoordinate2D(latitude: 40.0, longitude: -75.0)
+        
+        let poi = POILocation(
+            name: "Philadelphia Museum of Art",
+            coordinate: coordinate,
+            category: museum,
+            distance: 5000.0,
+            bearing: 45.0,
+            prominence: 0.9
+        )
+        
+        XCTAssertEqual(poi.category, museum)
+        XCTAssertEqual(poi.category.displayName, "Museum")
+    }
+    
+    func testMultiplePOICreation() {
+        let coordinate1 = CLLocationCoordinate2D(latitude: 40.0, longitude: -75.0)
+        let coordinate2 = CLLocationCoordinate2D(latitude: 41.0, longitude: -74.0)
+        let coordinate3 = CLLocationCoordinate2D(latitude: 39.0, longitude: -76.0)
+        
+        let poi1 = POILocation(name: "Museum", coordinate: coordinate1, category: .museum, distance: 1000.0, bearing: 45.0)
+        let poi2 = POILocation(name: "Park", coordinate: coordinate2, category: .park, distance: 2000.0, bearing: 90.0)
+        let poi3 = POILocation(name: "Airport", coordinate: coordinate3, category: .airport, distance: 5000.0, bearing: 180.0)
+        
+        let pois = [poi1, poi2, poi3]
+        
+        XCTAssertEqual(pois.count, 3)
+        XCTAssertEqual(pois[0].category, .museum)
+        XCTAssertEqual(pois[1].category, .park)
+        XCTAssertEqual(pois[2].category, .airport)
+    }
+    
+    func testPOISortingByDistance() {
+        let coordinate1 = CLLocationCoordinate2D(latitude: 40.0, longitude: -75.0)
+        let coordinate2 = CLLocationCoordinate2D(latitude: 41.0, longitude: -74.0)
+        let coordinate3 = CLLocationCoordinate2D(latitude: 39.0, longitude: -76.0)
+        
+        let poi1 = POILocation(name: "Far POI", coordinate: coordinate1, category: .museum, distance: 5000.0, bearing: 45.0)
+        let poi2 = POILocation(name: "Near POI", coordinate: coordinate2, category: .park, distance: 1000.0, bearing: 90.0)
+        let poi3 = POILocation(name: "Medium POI", coordinate: coordinate3, category: .airport, distance: 3000.0, bearing: 180.0)
+        
+        var pois = [poi1, poi2, poi3]
+        pois.sort { $0.distance < $1.distance }
+        
+        XCTAssertEqual(pois[0].name, "Near POI")
+        XCTAssertEqual(pois[1].name, "Medium POI")
+        XCTAssertEqual(pois[2].name, "Far POI")
     }
 }
