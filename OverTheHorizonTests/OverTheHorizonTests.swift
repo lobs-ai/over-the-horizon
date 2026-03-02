@@ -1202,7 +1202,7 @@ class OverlapResolverTests: XCTestCase {
     
     func testPriorityBasedResolution() {
         let poi1 = POILocation(name: "High", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 5000, bearing: 0)
-        let poi2 = POILocation(name: "Low", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .municipalBuilding, distance: 10000, bearing: 30)
+        let poi2 = POILocation(name: "Low", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .governmentBuilding, distance: 10000, bearing: 30)
         
         let position = CGPoint(x: 195, y: 422)
         let labels = [
