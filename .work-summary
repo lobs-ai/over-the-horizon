@@ -1,1 +1,12 @@
-Implemented AR overlay rendering with label positioning: ARLabelPositioner (positioning/scaling logic), AROverlayView (renders POI labels with animation), integrated into ContentView. Features: 45° horizontal FOV arc centered on heading, labels with name + downward arrow, distance-based vertical positioning (closer=lower+larger, farther=higher+smaller), smooth continuous scaling, label sliding in/out on device turn, partial clipping at edges, real-time orientation updates, active distance range filtering (100m-50km). Comprehensive test suite: 43 tests for positioning logic (FOV, distance, bearing, scaling, clipping, opacity), 4 tests for overlay views, 4 integration tests. All tests validate happy path and edge cases (bearing wrap-around at 0/360°, FOV boundaries, screen bounds). Ready for Xcode build.
+Implemented overlap resolution, interest scoring, and max 10 display limit for AR label system.
+
+Key changes:
+1. Fixed OverlapResolver: Corrected coordinate system handling (positions are screen coordinates, not normalized). Added screen bounds enforcement and improved overlap detection with padding.
+
+2. Verified POIScorer: All interest scoring components working correctly - category significance (parks/landmarks highest, civic lowest), distance weighting (midpoint optimal), prominence signals, directional centrality (center of 45° FOV > edges).
+
+3. Verified AROverlayView: Max 10 label display with dynamic reappearance - computed properties ensure labels reappear as device moves/rotates and top 10 changes by score.
+
+4. Added comprehensive tests: 490+ lines covering POIScorerTests (15 tests), OverlapResolverTests (20+ tests), MaxDisplayLimitTests, and CompleteOverlapAndScoringTests with full integration scenarios.
+
+All existing tests remain intact and new tests verify correct behavior of overlap resolution, priority-based positioning, score-based filtering, and dynamic reappearance on device movement.

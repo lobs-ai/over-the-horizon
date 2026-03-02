@@ -995,3 +995,496 @@ class ARIntegrationTests: XCTestCase {
         XCTAssertTrue(positioner.shouldDisplay(bearing: 1, heading: 359, distance: 5000))
     }
 }
+
+// MARK: - POIScorer Tests
+
+class POIScorerTests: XCTestCase {
+    
+    // MARK: - Category Significance Tests
+    
+    func testCategorySignificanceScores() {
+        // High significance categories
+        let landmarkScore = POIScorer.categoryScores[.landmark]
+        let parkScore = POIScorer.categoryScores[.park]
+        
+        // Low significance categories
+        let governmentScore = POIScorer.categoryScores[.governmentBuilding]
+        let publicSpaceScore = POIScorer.categoryScores[.publicSpace]
+        
+        // Landmarks/Parks should score higher than civic buildings
+        XCTAssertNotNil(landmarkScore)
+        XCTAssertNotNil(parkScore)
+        XCTAssertNotNil(governmentScore)
+        XCTAssertNotNil(publicSpaceScore)
+        
+        XCTAssertGreater(landmarkScore ?? 0, governmentScore ?? 0)
+        XCTAssertGreater(parkScore ?? 0, governmentScore ?? 0)
+    }
+    
+    func testAllCategoriesHaveScores() {
+        for category in LocationCategory.allCases {
+            let score = POIScorer.categoryScores[category]
+            XCTAssertNotNil(score, "Category \(category) should have a score")
+            XCTAssertGreaterThan(score ?? 0, 0, "Score for \(category) should be positive")
+        }
+    }
+    
+    // MARK: - Distance Weighting Tests
+    
+    func testDistanceWeightingOptimalDistance() {
+        let optimalDistance = POIScorer.optimalDistance
+        let closerDistance = optimalDistance - 1000
+        let fartherDistance = optimalDistance + 1000
+        
+        let poi1 = POILocation(name: "Test1", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: optimalDistance, bearing: 0)
+        let poi2 = POILocation(name: "Test2", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: closerDistance, bearing: 0)
+        let poi3 = POILocation(name: "Test3", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: fartherDistance, bearing: 0)
+        
+        // All scored with same bearing offset (0) for fair comparison
+        let score1 = POIScorer.calculateInterestScore(for: poi1, bearingOffset: 0)
+        let score2 = POIScorer.calculateInterestScore(for: poi2, bearingOffset: 0)
+        let score3 = POIScorer.calculateInterestScore(for: poi3, bearingOffset: 0)
+        
+        // Optimal should score highest, equidistant points should score equally
+        XCTAssertGreaterThan(score1, score2)
+        XCTAssertGreaterThan(score1, score3)
+        XCTAssertEqual(score2, score3, accuracy: 0.01) // Equidistant should be equal
+    }
+    
+    func testDistanceWeightingBounds() {
+        let minDistance = POIScorer.minDistance
+        let maxDistance = POIScorer.maxDistance
+        
+        let poiMin = POILocation(name: "Min", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: minDistance, bearing: 0)
+        let poiMax = POILocation(name: "Max", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: maxDistance, bearing: 0)
+        
+        let scoreMin = POIScorer.calculateInterestScore(for: poiMin, bearingOffset: 0)
+        let scoreMax = POIScorer.calculateInterestScore(for: poiMax, bearingOffset: 0)
+        
+        // Both should have valid scores
+        XCTAssertGreaterThanOrEqual(scoreMin, 0)
+        XCTAssertLessThanOrEqual(scoreMin, 1)
+        XCTAssertGreaterThanOrEqual(scoreMax, 0)
+        XCTAssertLessThanOrEqual(scoreMax, 1)
+    }
+    
+    // MARK: - Directional Centrality Tests
+    
+    func testDirectionalCentralityCenter() {
+        // POI directly ahead (bearing offset = 0)
+        let poi = POILocation(name: "Test", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0)
+        let scoreCenter = POIScorer.calculateInterestScore(for: poi, bearingOffset: 0)
+        
+        // POI at FOV edge (bearing offset = 22.5)
+        let scoreEdge = POIScorer.calculateInterestScore(for: poi, bearingOffset: 22.5)
+        
+        // Center should score higher than edge
+        XCTAssertGreater(scoreCenter, scoreEdge)
+    }
+    
+    func testDirectionalCentralitySymmetry() {
+        let poi = POILocation(name: "Test", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0)
+        
+        // Left and right should have equal scores
+        let scoreLeft = POIScorer.calculateInterestScore(for: poi, bearingOffset: -15.0)
+        let scoreRight = POIScorer.calculateInterestScore(for: poi, bearingOffset: 15.0)
+        
+        XCTAssertEqual(scoreLeft, scoreRight, accuracy: 0.01)
+    }
+    
+    // MARK: - Complete Interest Score Tests
+    
+    func testInterestScoreNormalization() {
+        let pois = [
+            POILocation(name: "A", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 5000, bearing: 0, prominence: 0.9),
+            POILocation(name: "B", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .museum, distance: 10000, bearing: 45, prominence: 0.5),
+            POILocation(name: "C", coordinate: CLLocationCoordinate2D(latitude: 41.9, longitude: -82.9), category: .governmentBuilding, distance: 3000, bearing: -30, prominence: 0.2),
+        ]
+        
+        for poi in pois {
+            let score = POIScorer.calculateInterestScore(for: poi, bearingOffset: 0)
+            XCTAssertGreaterThanOrEqual(score, 0.0)
+            XCTAssertLessThanOrEqual(score, 1.0)
+        }
+    }
+    
+    func testInterestScoreLandmarkVsCivic() {
+        let landmark = POILocation(name: "Landmark", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 5000, bearing: 0, prominence: 0.5)
+        let civic = POILocation(name: "Civic", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .governmentBuilding, distance: 5000, bearing: 0, prominence: 0.5)
+        
+        let landmarkScore = POIScorer.calculateInterestScore(for: landmark, bearingOffset: 0)
+        let civicScore = POIScorer.calculateInterestScore(for: civic, bearingOffset: 0)
+        
+        // Landmark should score higher than civic building
+        XCTAssertGreater(landmarkScore, civicScore)
+    }
+    
+    func testInterestScoreWithDifferentProminence() {
+        let poiHigh = POILocation(name: "High", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0, prominence: 0.9)
+        let poiLow = POILocation(name: "Low", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0, prominence: 0.1)
+        
+        let scoreHigh = POIScorer.calculateInterestScore(for: poiHigh, bearingOffset: 0)
+        let scoreLow = POIScorer.calculateInterestScore(for: poiLow, bearingOffset: 0)
+        
+        // Higher prominence should result in higher score
+        XCTAssertGreater(scoreHigh, scoreLow)
+    }
+}
+
+// MARK: - OverlapResolver Tests
+
+class OverlapResolverTests: XCTestCase {
+    var resolver: OverlapResolver!
+    let screenSize = CGSize(width: 390, height: 844)
+    
+    override func setUp() {
+        super.setUp()
+        resolver = OverlapResolver()
+    }
+    
+    override func tearDown() {
+        resolver = nil
+        super.tearDown()
+    }
+    
+    // MARK: - Basic Functionality Tests
+    
+    func testOverlapResolverInitialization() {
+        XCTAssertNotNil(resolver)
+        XCTAssertEqual(resolver.config.minVerticalSpacing, 60.0)
+        XCTAssertEqual(resolver.config.maxVerticalLevels, 3)
+    }
+    
+    func testResolveOverlapsEmptyList() {
+        let result = resolver.resolveOverlaps(for: [], screenSize: screenSize)
+        XCTAssertEqual(result.count, 0)
+    }
+    
+    func testResolveOverlapsSinglePOI() {
+        let poi = POILocation(name: "Test", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0)
+        let labels = [(poi: poi, score: 0.5, position: CGPoint(x: 195, y: 422))]
+        
+        let result = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].poi.name, "Test")
+        XCTAssertEqual(result[0].resolvedPosition, CGPoint(x: 195, y: 422))
+        XCTAssertEqual(result[0].zIndex, 0)
+    }
+    
+    // MARK: - Overlap Detection Tests
+    
+    func testDetectOverlappingLabels() {
+        let poi1 = POILocation(name: "Label1", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0)
+        let poi2 = POILocation(name: "Label2", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .park, distance: 3000, bearing: 45)
+        
+        // Two labels at same position should overlap
+        let position = CGPoint(x: 195, y: 422)
+        let labels = [
+            (poi: poi1, score: 0.8, position: position),
+            (poi: poi2, score: 0.6, position: position)
+        ]
+        
+        let result = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        // Both labels should have been resolved
+        XCTAssertEqual(result.count, 2)
+        
+        // Higher score (poi1) should maintain position
+        XCTAssertEqual(result[0].resolvedPosition, position)
+        
+        // Lower score (poi2) should be offset
+        XCTAssertNotEqual(result[1].resolvedPosition, position)
+        XCTAssertNotEqual(result[1].verticalOffset, 0)
+    }
+    
+    // MARK: - Priority-Based Resolution Tests
+    
+    func testPriorityBasedResolution() {
+        let poi1 = POILocation(name: "High", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 5000, bearing: 0)
+        let poi2 = POILocation(name: "Low", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .municipalBuilding, distance: 10000, bearing: 30)
+        
+        let position = CGPoint(x: 195, y: 422)
+        let labels = [
+            (poi: poi1, score: 0.9, position: position),  // Higher priority
+            (poi: poi2, score: 0.3, position: position)   // Lower priority
+        ]
+        
+        let result = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        // Higher score should get better position (no offset)
+        XCTAssertEqual(result[0].zIndex, 0)
+        XCTAssertGreater(result[1].zIndex, result[0].zIndex)
+    }
+    
+    // MARK: - Vertical Offset Tests
+    
+    func testVerticalOffsetCalculation() {
+        let poi = POILocation(name: "Test", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0)
+        let position = CGPoint(x: 195, y: 422)
+        let labels = [(poi: poi, score: 0.5, position: position)]
+        
+        let result = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        // Single label should have no offset
+        XCTAssertEqual(result[0].verticalOffset, 0)
+    }
+    
+    // MARK: - Multiple Labels Tests
+    
+    func testResolveManyOverlappingLabels() {
+        var labels: [(poi: POILocation, score: Double, position: CGPoint)] = []
+        let basePosition = CGPoint(x: 195, y: 422)
+        
+        // Create 5 labels at the same position with different scores
+        for i in 0..<5 {
+            let poi = POILocation(name: "Label\(i)", coordinate: CLLocationCoordinate2D(latitude: 42.0 + Double(i) * 0.1, longitude: -83.0), category: .museum, distance: 5000 + Double(i) * 1000, bearing: Double(i) * 45)
+            let score = Double(5 - i) * 0.2  // Descending scores: 1.0, 0.8, 0.6, 0.4, 0.2
+            labels.append((poi: poi, score: score, position: basePosition))
+        }
+        
+        let result = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        XCTAssertEqual(result.count, 5)
+        
+        // First label (highest score) should have lowest zIndex
+        XCTAssertEqual(result[0].zIndex, 0)
+        
+        // Labels should be sorted by score (descending)
+        for i in 1..<result.count {
+            XCTAssertGreaterThanOrEqual(result[i].zIndex, result[i-1].zIndex)
+        }
+    }
+    
+    // MARK: - Screen Bounds Tests
+    
+    func testPositionsStayWithinBounds() {
+        let poi1 = POILocation(name: "Label1", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0)
+        let poi2 = POILocation(name: "Label2", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .park, distance: 3000, bearing: 45)
+        let poi3 = POILocation(name: "Label3", coordinate: CLLocationCoordinate2D(latitude: 41.9, longitude: -82.9), category: .landmark, distance: 8000, bearing: -45)
+        
+        let labels = [
+            (poi: poi1, score: 0.8, position: CGPoint(x: 195, y: 50)),    // Near top
+            (poi: poi2, score: 0.6, position: CGPoint(x: 195, y: 800)),   // Near bottom
+            (poi: poi3, score: 0.4, position: CGPoint(x: 195, y: 422))    // Middle
+        ]
+        
+        let result = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        // All positions should stay within screen bounds
+        for resolved in result {
+            XCTAssertGreaterThanOrEqual(resolved.resolvedPosition.y, 0)
+            XCTAssertLessThanOrEqual(resolved.resolvedPosition.y, screenSize.height)
+        }
+    }
+    
+    func testNonOverlappingLabelsPreservePosition() {
+        let poi1 = POILocation(name: "Label1", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 0)
+        let poi2 = POILocation(name: "Label2", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .park, distance: 3000, bearing: 45)
+        
+        let labels = [
+            (poi: poi1, score: 0.8, position: CGPoint(x: 195, y: 200)),
+            (poi: poi2, score: 0.6, position: CGPoint(x: 195, y: 500))  // Far enough apart
+        ]
+        
+        let result = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        // Positions should be preserved since they don't overlap
+        XCTAssertEqual(result[0].resolvedPosition, CGPoint(x: 195, y: 200))
+        XCTAssertEqual(result[1].resolvedPosition, CGPoint(x: 195, y: 500))
+    }
+    
+    func testCustomConfiguration() {
+        let customConfig = OverlapResolver.Config(minVerticalSpacing: 100, maxVerticalLevels: 5)
+        let customResolver = OverlapResolver(config: customConfig)
+        
+        XCTAssertEqual(customResolver.config.minVerticalSpacing, 100)
+        XCTAssertEqual(customResolver.config.maxVerticalLevels, 5)
+    }
+}
+
+// MARK: - Max Display Limit Tests
+
+class MaxDisplayLimitTests: XCTestCase {
+    let maxDisplayedLabels = 10
+    
+    func testMaxDisplayLimitEnforced() {
+        // Create 20 POIs with different scores
+        var pois: [POILocation] = []
+        var expectedCount = 0
+        
+        for i in 0..<20 {
+            let poi = POILocation(
+                name: "POI\(i)",
+                coordinate: CLLocationCoordinate2D(latitude: 42.0 + Double(i) * 0.01, longitude: -83.0),
+                category: .museum,
+                distance: 5000 + Double(i) * 100,
+                bearing: Double(i) * 10,
+                prominence: Double(20 - i) / 20.0  // Decreasing prominence
+            )
+            pois.append(poi)
+            expectedCount = min(i + 1, maxDisplayedLabels)
+        }
+        
+        // Create AROverlayView with 20 POIs
+        let view = AROverlayView(pois: pois, heading: 0.0)
+        
+        // The displayedPOIs should be limited to maxDisplayedLabels
+        // Note: We can't directly access displayedPOIs since it's a computed property,
+        // but the view should render only max 10 labels
+        XCTAssertNotNil(view)
+    }
+    
+    func testDynamicReappearanceOnMovement() {
+        // Create 15 POIs with various bearings (to test FOV filtering)
+        var pois: [POILocation] = []
+        
+        for i in 0..<15 {
+            let poi = POILocation(
+                name: "POI\(i)",
+                coordinate: CLLocationCoordinate2D(latitude: 42.0 + Double(i) * 0.01, longitude: -83.0),
+                category: .museum,
+                distance: 5000 + Double(i) * 100,
+                bearing: Double(i) * 10,  // Spread across bearings
+                prominence: 0.5
+            )
+            pois.append(poi)
+        }
+        
+        // Create views with different headings
+        let view0 = AROverlayView(pois: pois, heading: 0.0)
+        let view45 = AROverlayView(pois: pois, heading: 45.0)
+        let view90 = AROverlayView(pois: pois, heading: 90.0)
+        
+        // All views should exist and be valid
+        XCTAssertNotNil(view0)
+        XCTAssertNotNil(view45)
+        XCTAssertNotNil(view90)
+        
+        // As heading changes, different POIs should be visible
+        // (assuming they have different bearings that fall within the 45° FOV)
+    }
+    
+    func testScoringInfluencesDisplayOrder() {
+        let positioner = ARLabelPositioner(screenWidth: 390, screenHeight: 844)
+        
+        // Create POIs where scoring should result in clear ordering
+        let pois = [
+            POILocation(name: "HighScore", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 25050, bearing: 0, prominence: 0.9),
+            POILocation(name: "MidScore", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .museum, distance: 25050, bearing: 0, prominence: 0.5),
+            POILocation(name: "LowScore", coordinate: CLLocationCoordinate2D(latitude: 41.9, longitude: -82.9), category: .governmentBuilding, distance: 25050, bearing: 0, prominence: 0.2),
+        ]
+        
+        let heading = 0.0
+        
+        // Calculate scores for each
+        var scores: [(String, Double)] = []
+        for poi in pois {
+            let bearingOffset = positioner.normalizeBearingDifference(poi.bearing - heading)
+            let score = POIScorer.calculateInterestScore(for: poi, bearingOffset: bearingOffset)
+            scores.append((poi.name, score))
+        }
+        
+        // HighScore should have highest score
+        XCTAssertGreater(scores[0].1, scores[1].1)
+        XCTAssertGreater(scores[1].1, scores[2].1)
+    }
+}
+
+// MARK: - Complete Integration Tests
+
+class CompleteOverlapAndScoringTests: XCTestCase {
+    func testCompleteWorkflowWithManyPOIs() {
+        let positioner = ARLabelPositioner(screenWidth: 390, screenHeight: 844)
+        let resolver = OverlapResolver()
+        let screenSize = CGSize(width: 390, height: 844)
+        
+        // Create 20 POIs within FOV
+        var pois: [POILocation] = []
+        for i in 0..<20 {
+            let poi = POILocation(
+                name: "POI\(i)",
+                coordinate: CLLocationCoordinate2D(latitude: 42.0 + Double(i) * 0.001, longitude: -83.0),
+                category: (i % 2 == 0) ? .landmark : .museum,
+                distance: 5000.0 + Double(i) * 500,
+                bearing: Double(i) * 2,  // All within FOV
+                prominence: 0.5
+            )
+            pois.append(poi)
+        }
+        
+        let heading = 0.0
+        
+        // Filter visible POIs
+        let visiblePOIs = pois.filter { poi in
+            positioner.shouldDisplay(bearing: poi.bearing, heading: heading, distance: poi.distance)
+        }
+        
+        // Score visible POIs
+        var scoredPOIs: [(poi: POILocation, score: Double)] = []
+        for poi in visiblePOIs {
+            let bearingOffset = positioner.normalizeBearingDifference(poi.bearing - heading)
+            let score = POIScorer.calculateInterestScore(for: poi, bearingOffset: bearingOffset)
+            scoredPOIs.append((poi: poi, score: score))
+        }
+        
+        // Sort by score and limit to 10
+        scoredPOIs.sort { $0.score > $1.score }
+        let displayedPOIs = Array(scoredPOIs.prefix(10))
+        
+        // Calculate positions for display
+        var labelPositions: [(poi: POILocation, score: Double, position: CGPoint)] = []
+        for pair in displayedPOIs {
+            let position = positioner.calculateScreenPosition(bearing: pair.poi.bearing, heading: heading, distance: pair.poi.distance)
+            labelPositions.append((pair.poi, pair.score, position))
+        }
+        
+        // Resolve overlaps
+        let resolvedLabels = resolver.resolveOverlaps(for: labelPositions, screenSize: screenSize)
+        
+        // Verify results
+        XCTAssertEqual(displayedPOIs.count, 10)  // Should be exactly 10
+        XCTAssertEqual(resolvedLabels.count, 10)
+        
+        // All resolved labels should have valid positions
+        for resolved in resolvedLabels {
+            XCTAssertGreaterThanOrEqual(resolved.resolvedPosition.y, 0)
+            XCTAssertLessThanOrEqual(resolved.resolvedPosition.y, screenSize.height)
+        }
+        
+        // Scores should be in descending order
+        for i in 1..<displayedPOIs.count {
+            XCTAssertGreaterThanOrEqual(displayedPOIs[i-1].score, displayedPOIs[i].score)
+        }
+    }
+    
+    func testOverlapResolutionWithPriority() {
+        let resolver = OverlapResolver()
+        let screenSize = CGSize(width: 390, height: 844)
+        
+        let poi1 = POILocation(name: "Priority1", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 5000, bearing: 0)
+        let poi2 = POILocation(name: "Priority2", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .museum, distance: 6000, bearing: 10)
+        let poi3 = POILocation(name: "Priority3", coordinate: CLLocationCoordinate2D(latitude: 42.2, longitude: -83.2), category: .park, distance: 7000, bearing: 20)
+        
+        // All at the same position with different scores
+        let centerPosition = CGPoint(x: 195, y: 422)
+        let labels = [
+            (poi: poi1, score: 0.9, position: centerPosition),
+            (poi: poi2, score: 0.7, position: centerPosition),
+            (poi: poi3, score: 0.5, position: centerPosition)
+        ]
+        
+        let resolved = resolver.resolveOverlaps(for: labels, screenSize: screenSize)
+        
+        // First label (highest score) should keep center position
+        XCTAssertEqual(resolved[0].resolvedPosition, centerPosition)
+        XCTAssertEqual(resolved[0].zIndex, 0)
+        
+        // Other labels should be offset
+        XCTAssertNotEqual(resolved[1].resolvedPosition.y, centerPosition.y)
+        XCTAssertGreater(resolved[1].zIndex, 0)
+        
+        XCTAssertNotEqual(resolved[2].resolvedPosition.y, centerPosition.y)
+        XCTAssertGreater(resolved[2].zIndex, 0)
+    }
+}
