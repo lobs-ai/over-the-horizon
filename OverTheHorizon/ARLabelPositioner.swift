@@ -172,7 +172,7 @@ struct ARLabelPositioner {
     
     /// Normalizes bearing difference to range [-180, 180].
     /// This represents the shortest angular distance between two bearings.
-    private func normalizeBearingDifference(_ difference: Double) -> Double {
+    func normalizeBearingDifference(_ difference: Double) -> Double {
         var normalized = difference.truncatingRemainder(dividingBy: 360.0)
         
         if normalized > 180.0 {

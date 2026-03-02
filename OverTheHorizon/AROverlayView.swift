@@ -8,9 +8,12 @@
 import SwiftUI
 import CoreLocation
 
+/// Maximum number of labels to display simultaneously.
+let maxDisplayedLabels = 10
+
 /// Renders the AR overlay with POI labels positioned and scaled based on bearing, heading, and distance.
 struct AROverlayView: View {
-    /// Array of POIs to display
+    /// Array of POIs to display (before filtering/sorting)
     let pois: [POILocation]
     
     /// Current device heading in degrees
@@ -22,6 +25,52 @@ struct AROverlayView: View {
     /// Positioner for calculating label positions
     private var positioner: ARLabelPositioner {
         ARLabelPositioner(screenWidth: screenSize.width, screenHeight: screenSize.height)
+    }
+    
+    /// Overlap resolver for positioning non-overlapping labels
+    private var overlapResolver: OverlapResolver {
+        OverlapResolver()
+    }
+    
+    /// Computed property with filtered and scored POIs (max 10).
+    private var displayedPOIs: [(poi: POILocation, score: Double)] {
+        guard let heading = heading else { return [] }
+        
+        // Filter POIs that should be displayed based on FOV and distance
+        let visiblePOIs = pois.filter { poi in
+            positioner.shouldDisplay(bearing: poi.bearing, heading: heading, distance: poi.distance)
+        }
+        
+        // Calculate interest scores for each visible POI
+        var scoredPOIs: [(poi: POILocation, score: Double)] = []
+        for poi in visiblePOIs {
+            let bearingOffset = positioner.normalizeBearingDifference(poi.bearing - heading)
+            let score = POIScorer.calculateInterestScore(for: poi, bearingOffset: bearingOffset)
+            scoredPOIs.append((poi: poi, score: score))
+        }
+        
+        // Sort by score (highest first) and limit to maxDisplayedLabels
+        scoredPOIs.sort { $0.score > $1.score }
+        return Array(scoredPOIs.prefix(maxDisplayedLabels))
+    }
+    
+    /// Resolved labels with overlap-adjusted positions.
+    private var resolvedLabels: [OverlapResolver.ResolvedLabel] {
+        let scorePairs = displayedPOIs.map { (poi: $0.poi, score: $0.score) }
+        
+        // Calculate screen positions for each POI
+        var labeledPositions: [(poi: POILocation, score: Double, position: CGPoint)] = []
+        for pair in scorePairs {
+            let position = positioner.calculateScreenPosition(
+                bearing: pair.poi.bearing,
+                heading: heading ?? 0.0,
+                distance: pair.poi.distance
+            )
+            labeledPositions.append((pair.poi, pair.score, position))
+        }
+        
+        // Resolve overlaps using priority-based vertical offsetting
+        return overlapResolver.resolveOverlaps(for: labeledPositions, screenSize: screenSize)
     }
     
     var body: some View {
@@ -36,13 +85,15 @@ struct AROverlayView: View {
                         screenSize = newSize
                     }
                 
-                // Render labels
+                // Render resolved labels (non-overlapping, priority-based)
                 ZStack {
-                    ForEach(pois) { poi in
+                    ForEach(resolvedLabels, id: \.poi.id) { resolvedLabel in
                         POILabelView(
-                            poi: poi,
+                            poi: resolvedLabel.poi,
                             heading: heading,
-                            positioner: positioner
+                            positioner: positioner,
+                            adjustedPosition: resolvedLabel.resolvedPosition,
+                            zIndex: resolvedLabel.zIndex
                         )
                     }
                 }
@@ -59,16 +110,17 @@ struct POILabelView: View {
     let heading: Double?
     let positioner: ARLabelPositioner
     
+    /// Position adjusted for overlap resolution (may differ from calculated).
+    let adjustedPosition: CGPoint
+    
+    /// Z-index for layering (higher = draws on top).
+    let zIndex: Int
+    
     /// Animation state for smooth transitions
     @State private var isVisible: Bool = true
     
     var body: some View {
         let shouldDisplay = shouldShowPOI()
-        let position = positioner.calculateScreenPosition(
-            bearing: poi.bearing,
-            heading: heading ?? 0.0,
-            distance: poi.distance
-        )
         let fontSize = positioner.calculateFontSize(for: poi.distance)
         let opacity = positioner.calculateOpacity(bearing: poi.bearing, heading: heading ?? 0.0)
         let clippingScale = positioner.calculateClippingScale(bearing: poi.bearing, heading: heading ?? 0.0)
@@ -91,9 +143,10 @@ struct POILabelView: View {
             .padding(.vertical, 4)
             .background(Color.black.opacity(0.6))
             .cornerRadius(6)
-            .position(position)
+            .position(adjustedPosition)
             .opacity(opacity)
             .scaleEffect(clippingScale, anchor: .center)
+            .zIndex(CGFloat(zIndex))
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.3), value: shouldDisplay)
             .animation(.easeInOut(duration: 0.1), value: fontSize)
