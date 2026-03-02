@@ -385,8 +385,8 @@ class POISearchManagerTests: XCTestCase {
     }
     
     func testSearchRadiusMaximumClamping() {
-        sut.searchRadiusMiles = 20.0
-        XCTAssertEqual(sut.searchRadiusMiles, 10.0)
+        sut.searchRadiusMiles = 7.0
+        XCTAssertEqual(sut.searchRadiusMiles, 5.0)
     }
     
     func testSearchRadiusValidRange() {
@@ -395,7 +395,7 @@ class POISearchManagerTests: XCTestCase {
     }
     
     func testSearchRadiusRangeOfValidValues() {
-        let validRanges = [1.0, 2.5, 5.0, 7.5, 10.0]
+        let validRanges = [1.0, 2.0, 3.5, 5.0]
         for range in validRanges {
             sut.searchRadiusMiles = range
             XCTAssertEqual(sut.searchRadiusMiles, range)
@@ -439,11 +439,11 @@ class POISearchManagerTests: XCTestCase {
         sut.searchRadiusMiles = 1.0
         XCTAssertEqual(sut.searchRadiusMiles, 1.0)
         
-        sut.searchRadiusMiles = 10.0
-        XCTAssertEqual(sut.searchRadiusMiles, 10.0)
+        sut.searchRadiusMiles = 5.0
+        XCTAssertEqual(sut.searchRadiusMiles, 5.0)
         
         sut.searchRadiusMiles = 100.0
-        XCTAssertEqual(sut.searchRadiusMiles, 10.0)
+        XCTAssertEqual(sut.searchRadiusMiles, 5.0)
     }
     
     func testInitialSearchState() {

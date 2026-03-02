@@ -17,11 +17,11 @@ class POISearchManager: NSObject, ObservableObject {
     /// Array of discovered POIs, sorted by proximity to user.
     @Published var pois: [POILocation] = []
     
-    /// Search radius in miles. Default is 5 miles, configurable from 1-10 miles.
+    /// Search radius in miles. Default is 5 miles, configurable from 1-5 miles.
     @Published var searchRadiusMiles: Double = 5.0 {
         didSet {
-            // Clamp to 1-10 mile range
-            searchRadiusMiles = max(1.0, min(10.0, searchRadiusMiles))
+            // Clamp to 1-5 mile range
+            searchRadiusMiles = max(1.0, min(5.0, searchRadiusMiles))
         }
     }
     
