@@ -20,6 +20,9 @@ struct ContentView: View {
     // UI State
     @State private var showPOIList = false
     
+    // Pinch gesture tracking for incremental zoom updates
+    @State private var lastMagnificationScale: CGFloat = 1.0
+    
     init() {
         let locationMgr = LocationManager()
         _locationManager = StateObject(wrappedValue: locationMgr)
@@ -46,7 +49,16 @@ struct ContentView: View {
             .gesture(
                 MagnificationGesture()
                     .onChanged { value in
-                        zoomGestureManager.updateZoomWithGesture(scaleFactor: value)
+                        // Calculate incremental scale change
+                        // MagnificationGesture reports cumulative scale from gesture start,
+                        // so we need to calculate the delta from the last reported value
+                        let scaleDelta = value / lastMagnificationScale
+                        zoomGestureManager.updateZoomWithGesture(scaleFactor: scaleDelta)
+                        lastMagnificationScale = value
+                    }
+                    .onEnded { _ in
+                        // Reset for next gesture
+                        lastMagnificationScale = 1.0
                     }
             )
 

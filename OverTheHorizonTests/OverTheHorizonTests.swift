@@ -2024,3 +2024,271 @@ class ZoomAROverlayIntegrationTests: XCTestCase {
         XCTAssertEqual(resetSize, defaultSize, accuracy: 0.1)
     }
 }
+
+// MARK: - Incremental Zoom Gesture Tests
+
+class IncrementalZoomGestureTests: XCTestCase {
+    var manager: ZoomGestureManager!
+    
+    override func setUp() {
+        super.setUp()
+        manager = ZoomGestureManager()
+    }
+    
+    override func tearDown() {
+        manager = nil
+        super.tearDown()
+    }
+    
+    func testIncrementalPinchOut() {
+        // Simulate a series of incremental pinch out gestures
+        let initialZoom = manager.zoomLevel
+        
+        // First pinch segment: 1.0 -> 1.2 (scale delta = 1.2)
+        manager.updateZoomWithGesture(scaleFactor: 1.2)
+        let zoomAfterFirst = manager.zoomLevel
+        XCTAssertGreater(zoomAfterFirst, initialZoom)
+        
+        // Second pinch segment: continue (scale delta = 1.1)
+        manager.updateZoomWithGesture(scaleFactor: 1.1)
+        let zoomAfterSecond = manager.zoomLevel
+        XCTAssertGreater(zoomAfterSecond, zoomAfterFirst)
+    }
+    
+    func testIncrementalPinchIn() {
+        manager.setZoomLevel(2.0)
+        let initialZoom = manager.zoomLevel
+        
+        // First pinch segment: zoom in (scale delta = 0.8)
+        manager.updateZoomWithGesture(scaleFactor: 0.8)
+        let zoomAfterFirst = manager.zoomLevel
+        XCTAssertLess(zoomAfterFirst, initialZoom)
+        
+        // Second pinch segment: continue zooming in (scale delta = 0.9)
+        manager.updateZoomWithGesture(scaleFactor: 0.9)
+        let zoomAfterSecond = manager.zoomLevel
+        XCTAssertLess(zoomAfterSecond, zoomAfterFirst)
+    }
+    
+    func testPinchOutIncreasesBothDistances() {
+        let initialMinDistance = manager.minDistance
+        let initialMaxDistance = manager.maxDistance
+        
+        // Pinch out
+        manager.updateZoomWithGesture(scaleFactor: 1.5)
+        
+        XCTAssertGreater(manager.maxDistance, initialMaxDistance)
+        XCTAssertGreater(manager.minDistance, initialMinDistance)
+    }
+    
+    func testPinchInDecreasesBothDistances() {
+        manager.setZoomLevel(2.0)  // Start zoomed out
+        let initialMinDistance = manager.minDistance
+        let initialMaxDistance = manager.maxDistance
+        
+        // Pinch in
+        manager.updateZoomWithGesture(scaleFactor: 0.7)
+        
+        XCTAssertLess(manager.maxDistance, initialMaxDistance)
+        XCTAssertLess(manager.minDistance, initialMinDistance)
+    }
+    
+    func testPinchOutDecreasesFontSize() {
+        let initialScale = manager.labelScaleMultiplier
+        
+        // Pinch out (zoom increases)
+        manager.updateZoomWithGesture(scaleFactor: 2.0)
+        
+        XCTAssertLess(manager.labelScaleMultiplier, initialScale)
+    }
+    
+    func testPinchInIncreasesFontSize() {
+        manager.setZoomLevel(2.0)  // Start zoomed out
+        let initialScale = manager.labelScaleMultiplier
+        
+        // Pinch in (zoom decreases)
+        manager.updateZoomWithGesture(scaleFactor: 0.5)
+        
+        XCTAssertGreater(manager.labelScaleMultiplier, initialScale)
+    }
+    
+    func testSmallPinchMovement() {
+        let initialZoom = manager.zoomLevel
+        
+        // Very small pinch (should still update if > threshold)
+        manager.updateZoomWithGesture(scaleFactor: 1.02)
+        
+        // Zoom should update slightly
+        XCTAssertNotEqual(manager.zoomLevel, initialZoom, accuracy: 0.001)
+    }
+    
+    func testRepeatedSmallPinches() {
+        let initialZoom = manager.zoomLevel
+        
+        // Multiple small pinches should accumulate
+        for _ in 0..<5 {
+            manager.updateZoomWithGesture(scaleFactor: 1.05)
+        }
+        
+        XCTAssertGreater(manager.zoomLevel, initialZoom)
+    }
+    
+    func testPinchGestureRespectsBounds() {
+        // Try to zoom out beyond max
+        for _ in 0..<10 {
+            manager.updateZoomWithGesture(scaleFactor: 2.0)
+        }
+        
+        XCTAssertLessThanOrEqual(manager.zoomLevel, manager.maxZoomLevel)
+        XCTAssertLessThanOrEqual(manager.maxDistance, manager.absoluteMaxDistance)
+        
+        // Try to zoom in beyond min
+        for _ in 0..<10 {
+            manager.updateZoomWithGesture(scaleFactor: 0.5)
+        }
+        
+        XCTAssertGreaterThanOrEqual(manager.zoomLevel, manager.minZoomLevel)
+        XCTAssertGreaterThanOrEqual(manager.minDistance, manager.absoluteMinDistance)
+    }
+    
+    func testAlternatingPinchMovements() {
+        let initialZoom = manager.zoomLevel
+        
+        // Pinch out
+        manager.updateZoomWithGesture(scaleFactor: 1.3)
+        let zoomAfterOut = manager.zoomLevel
+        XCTAssertGreater(zoomAfterOut, initialZoom)
+        
+        // Pinch in
+        manager.updateZoomWithGesture(scaleFactor: 0.8)
+        let zoomAfterIn = manager.zoomLevel
+        XCTAssertLess(zoomAfterIn, zoomAfterOut)
+        
+        // Pinch out again
+        manager.updateZoomWithGesture(scaleFactor: 1.2)
+        let zoomFinal = manager.zoomLevel
+        XCTAssertGreater(zoomFinal, zoomAfterIn)
+    }
+    
+    func testZoomAffectsVisibilityRanges() {
+        let positioner1 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: manager.minDistance,
+            maxDistance: manager.maxDistance,
+            labelScaleMultiplier: manager.labelScaleMultiplier
+        )
+        
+        // Check what's visible at default zoom
+        let poi500 = 500.0
+        let poi80k = 80000.0
+        let visible500Default = positioner1.shouldDisplay(bearing: 0, heading: 0, distance: poi500)
+        let visible80kDefault = positioner1.shouldDisplay(bearing: 0, heading: 0, distance: poi80k)
+        
+        // Zoom in
+        manager.updateZoomWithGesture(scaleFactor: 0.5)
+        let positioner2 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: manager.minDistance,
+            maxDistance: manager.maxDistance,
+            labelScaleMultiplier: manager.labelScaleMultiplier
+        )
+        
+        // POI at 500m should be closer to visibility threshold when zoomed in
+        let visible500ZoomedIn = positioner2.shouldDisplay(bearing: 0, heading: 0, distance: poi500)
+        
+        // Zoom out
+        manager.setZoomLevel(3.0)
+        let positioner3 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: manager.minDistance,
+            maxDistance: manager.maxDistance,
+            labelScaleMultiplier: manager.labelScaleMultiplier
+        )
+        
+        // POI at 80km should be visible when zoomed out
+        let visible80kZoomedOut = positioner3.shouldDisplay(bearing: 0, heading: 0, distance: poi80k)
+        XCTAssertTrue(visible80kZoomedOut)
+    }
+    
+    func testLabelSizeChangesWithGesture() {
+        let distance = 25000.0
+        
+        let positioner1 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: manager.minDistance,
+            maxDistance: manager.maxDistance,
+            labelScaleMultiplier: manager.labelScaleMultiplier
+        )
+        let sizeDefault = positioner1.calculateFontSize(for: distance)
+        
+        // Pinch out (zoom increases, labels get smaller)
+        manager.updateZoomWithGesture(scaleFactor: 2.0)
+        let positioner2 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: manager.minDistance,
+            maxDistance: manager.maxDistance,
+            labelScaleMultiplier: manager.labelScaleMultiplier
+        )
+        let sizeZoomedOut = positioner2.calculateFontSize(for: distance)
+        
+        XCTAssertLess(sizeZoomedOut, sizeDefault)
+    }
+    
+    func testComplexGestureSequence() {
+        // Simulate a realistic user interaction: zooming in and out with multiple touches
+        var zoomLevels: [Double] = [manager.zoomLevel]
+        
+        // Out
+        manager.updateZoomWithGesture(scaleFactor: 1.3)
+        zoomLevels.append(manager.zoomLevel)
+        
+        // Out more
+        manager.updateZoomWithGesture(scaleFactor: 1.2)
+        zoomLevels.append(manager.zoomLevel)
+        
+        // In
+        manager.updateZoomWithGesture(scaleFactor: 0.85)
+        zoomLevels.append(manager.zoomLevel)
+        
+        // In more
+        manager.updateZoomWithGesture(scaleFactor: 0.8)
+        zoomLevels.append(manager.zoomLevel)
+        
+        // Out
+        manager.updateZoomWithGesture(scaleFactor: 1.5)
+        zoomLevels.append(manager.zoomLevel)
+        
+        // Verify all zoom levels are within bounds
+        for zoom in zoomLevels {
+            XCTAssertGreaterThanOrEqual(zoom, manager.minZoomLevel)
+            XCTAssertLessThanOrEqual(zoom, manager.maxZoomLevel)
+        }
+        
+        // Verify zoom progression is reasonable
+        XCTAssertGreater(zoomLevels[1], zoomLevels[0])  // First out
+        XCTAssertGreater(zoomLevels[2], zoomLevels[1])  // More out
+        XCTAssertLess(zoomLevels[3], zoomLevels[2])     // In
+        XCTAssertLess(zoomLevels[4], zoomLevels[3])     // More in
+        XCTAssertGreater(zoomLevels[5], zoomLevels[4])  // Out
+    }
+    
+    func testDistanceRangeExpansionWithZoom() {
+        // Test that distance ranges expand/contract properly during zooming
+        let initialRange = manager.maxDistance - manager.minDistance
+        
+        // Zoom out
+        manager.updateZoomWithGesture(scaleFactor: 2.0)
+        let zoomedOutRange = manager.maxDistance - manager.minDistance
+        XCTAssertGreater(zoomedOutRange, initialRange)
+        
+        // Zoom in
+        manager.updateZoomWithGesture(scaleFactor: 0.5)
+        let zoomedInRange = manager.maxDistance - manager.minDistance
+        XCTAssertLess(zoomedInRange, zoomedOutRange)
+    }
+}
