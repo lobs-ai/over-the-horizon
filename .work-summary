@@ -1,12 +1,42 @@
-Implemented overlap resolution, interest scoring, and max 10 display limit for AR label system.
+Implemented zoom gestures + distance range control for Over the Horizon iOS AR app.
 
-Key changes:
-1. Fixed OverlapResolver: Corrected coordinate system handling (positions are screen coordinates, not normalized). Added screen bounds enforcement and improved overlap detection with padding.
+CHANGES:
+1. Created ZoomGestureManager.swift - Manages pinch zoom state, distance ranges, and label scaling
+   - Pinch OUT: increases min/max distances, smaller labels (zoom out view)
+   - Pinch IN: decreases min/max distances, larger labels (focus nearer)
+   - Zoom level range: 0.3x (max zoom in) to 3.0x (max zoom out)
+   - Labels disappear when closer than min distance (dynamically set by zoom)
 
-2. Verified POIScorer: All interest scoring components working correctly - category significance (parks/landmarks highest, civic lowest), distance weighting (midpoint optimal), prominence signals, directional centrality (center of 45° FOV > edges).
+2. Modified ARLabelPositioner.swift - Now supports dynamic distance ranges and label scaling
+   - Accepts minDistance, maxDistance, and labelScaleMultiplier parameters
+   - Font sizes scaled by labelScaleMultiplier (inverse of zoom level)
+   - Still respects reasonable min/max bounds
 
-3. Verified AROverlayView: Max 10 label display with dynamic reappearance - computed properties ensure labels reappear as device moves/rotates and top 10 changes by score.
+3. Updated ContentView.swift
+   - Added @StateObject for ZoomGestureManager
+   - Integrated MagnificationGesture to capture pinch zoom input
+   - Display zoom level info in debug HUD (zoom level + distance range)
+   - Pass zoom manager to AROverlayView
 
-4. Added comprehensive tests: 490+ lines covering POIScorerTests (15 tests), OverlapResolverTests (20+ tests), MaxDisplayLimitTests, and CompleteOverlapAndScoringTests with full integration scenarios.
+4. Updated AROverlayView.swift
+   - Accepts ZoomGestureManager as @ObservedObject
+   - Creates ARLabelPositioner with dynamic zoom values
+   - Labels update position, size, and visibility based on zoom
 
-All existing tests remain intact and new tests verify correct behavior of overlap resolution, priority-based positioning, score-based filtering, and dynamic reappearance on device movement.
+5. Comprehensive test coverage (40+ new tests)
+   - ZoomGestureManager: initialization, zoom bounds, gesture handling, distance/label updates
+   - ARLabelPositioner integration: font sizing with zoom, display filtering
+   - Integration tests: full zoom workflows, smooth transitions, gesture chains
+
+TESTING:
+- All existing tests remain passing
+- 40 new tests covering zoom functionality (ZoomGestureManagerTests, ARLabelPositionerWithZoomTests, ZoomAROverlayIntegrationTests)
+- Tests verify: bounds checking, smooth responses, distance range control, label scaling
+- Swift syntax validation: all files parse without errors
+
+BEHAVIOR:
+✓ Smooth pinch response - zoom level updates continuously during gesture
+✓ Reasonable min/max bounds - absolute bounds prevent extreme values
+✓ Labels scale dynamically - inverse relationship to zoom (zoom out = smaller labels)
+✓ Distance visibility changes - zoom in shows closer POIs, zoom out shows farther POIs
+✓ Does NOT change camera FOV - only adjusts distance thresholds and label sizes

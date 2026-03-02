@@ -1488,3 +1488,539 @@ class CompleteOverlapAndScoringTests: XCTestCase {
         XCTAssertGreater(resolved[2].zIndex, 0)
     }
 }
+
+// MARK: - ZoomGestureManager Tests
+
+class ZoomGestureManagerTests: XCTestCase {
+    var sut: ZoomGestureManager!
+    
+    override func setUp() {
+        super.setUp()
+        sut = ZoomGestureManager()
+    }
+    
+    override func tearDown() {
+        sut = nil
+        super.tearDown()
+    }
+    
+    // MARK: - Initialization Tests
+    
+    func testZoomGestureManagerInitialization() {
+        XCTAssertNotNil(sut)
+        XCTAssertEqual(sut.zoomLevel, 1.0)
+        XCTAssertEqual(sut.labelScaleMultiplier, 1.0)
+    }
+    
+    func testDefaultDistances() {
+        XCTAssertEqual(sut.minDistance, 100.0)
+        XCTAssertEqual(sut.maxDistance, 50000.0)
+    }
+    
+    func testDefaultZoomConstants() {
+        XCTAssertEqual(sut.minZoomLevel, 0.3)
+        XCTAssertEqual(sut.maxZoomLevel, 3.0)
+        XCTAssertEqual(sut.defaultMinDistance, 100.0)
+        XCTAssertEqual(sut.defaultMaxDistance, 50000.0)
+    }
+    
+    // MARK: - Zoom Level Tests
+    
+    func testSetZoomLevelInBounds() {
+        sut.setZoomLevel(0.5)
+        XCTAssertEqual(sut.zoomLevel, 0.5)
+        
+        sut.setZoomLevel(2.0)
+        XCTAssertEqual(sut.zoomLevel, 2.0)
+    }
+    
+    func testSetZoomLevelBelowMinimum() {
+        sut.setZoomLevel(0.1)
+        XCTAssertEqual(sut.zoomLevel, sut.minZoomLevel)
+        XCTAssertEqual(sut.zoomLevel, 0.3)
+    }
+    
+    func testSetZoomLevelAboveMaximum() {
+        sut.setZoomLevel(5.0)
+        XCTAssertEqual(sut.zoomLevel, sut.maxZoomLevel)
+        XCTAssertEqual(sut.zoomLevel, 3.0)
+    }
+    
+    func testSetZoomLevelZerosClamped() {
+        sut.setZoomLevel(0.0)
+        XCTAssertEqual(sut.zoomLevel, sut.minZoomLevel)
+    }
+    
+    func testSetZoomLevelNegativeClamped() {
+        sut.setZoomLevel(-1.0)
+        XCTAssertEqual(sut.zoomLevel, sut.minZoomLevel)
+    }
+    
+    // MARK: - Gesture Update Tests
+    
+    func testUpdateZoomWithGestureScaleOut() {
+        // Pinch OUT (scale > 1) should increase zoom
+        let initialZoom = sut.zoomLevel
+        sut.updateZoomWithGesture(scaleFactor: 1.2)
+        
+        XCTAssertGreater(sut.zoomLevel, initialZoom)
+    }
+    
+    func testUpdateZoomWithGestureScaleIn() {
+        // Pinch IN (scale < 1) should decrease zoom
+        sut.setZoomLevel(1.5)
+        let initialZoom = sut.zoomLevel
+        sut.updateZoomWithGesture(scaleFactor: 0.8)
+        
+        XCTAssertLess(sut.zoomLevel, initialZoom)
+    }
+    
+    func testUpdateZoomWithGestureRespectsBounds() {
+        sut.setZoomLevel(2.8)
+        sut.updateZoomWithGesture(scaleFactor: 2.0)  // Try to zoom out beyond max
+        
+        XCTAssertLessThanOrEqual(sut.zoomLevel, sut.maxZoomLevel)
+    }
+    
+    func testUpdateZoomWithGestureMinBound() {
+        sut.setZoomLevel(0.4)
+        sut.updateZoomWithGesture(scaleFactor: 0.5)  // Try to zoom in beyond min
+        
+        XCTAssertGreaterThanOrEqual(sut.zoomLevel, sut.minZoomLevel)
+    }
+    
+    // MARK: - Distance Range Tests
+    
+    func testDistanceRangeAtDefaultZoom() {
+        sut.setZoomLevel(1.0)
+        
+        XCTAssertEqual(sut.minDistance, sut.defaultMinDistance)
+        XCTAssertEqual(sut.maxDistance, sut.defaultMaxDistance)
+    }
+    
+    func testDistanceRangeAtMaxZoomOut() {
+        sut.setZoomLevel(3.0)
+        
+        // Max zoom out should increase distances
+        XCTAssertGreater(sut.maxDistance, sut.defaultMaxDistance)
+        XCTAssertGreater(sut.minDistance, sut.defaultMinDistance)
+    }
+    
+    func testDistanceRangeAtMaxZoomIn() {
+        sut.setZoomLevel(0.3)
+        
+        // Max zoom in should decrease distances
+        XCTAssertLess(sut.minDistance, sut.defaultMinDistance)
+        XCTAssertLess(sut.maxDistance, sut.defaultMaxDistance)
+    }
+    
+    func testMinDistanceRespectsBounds() {
+        sut.setZoomLevel(0.3)
+        XCTAssertGreaterThanOrEqual(sut.minDistance, sut.absoluteMinDistance)
+    }
+    
+    func testMaxDistanceRespectsBounds() {
+        sut.setZoomLevel(3.0)
+        XCTAssertLessThanOrEqual(sut.maxDistance, sut.absoluteMaxDistance)
+    }
+    
+    func testDistanceBoundsConsistent() {
+        for zoomLevel in stride(from: 0.3, through: 3.0, by: 0.3) {
+            sut.setZoomLevel(zoomLevel)
+            XCTAssertLess(sut.minDistance, sut.maxDistance)
+        }
+    }
+    
+    // MARK: - Label Scale Tests
+    
+    func testLabelScaleAtDefaultZoom() {
+        sut.setZoomLevel(1.0)
+        XCTAssertEqual(sut.labelScaleMultiplier, 1.0)
+    }
+    
+    func testLabelScaleAtMaxZoomOut() {
+        sut.setZoomLevel(3.0)
+        // Zoom out should make labels smaller
+        XCTAssertLess(sut.labelScaleMultiplier, 1.0)
+        XCTAssertEqual(sut.labelScaleMultiplier, 1.0 / 3.0, accuracy: 0.01)
+    }
+    
+    func testLabelScaleAtMaxZoomIn() {
+        sut.setZoomLevel(0.3)
+        // Zoom in should make labels larger
+        XCTAssertGreater(sut.labelScaleMultiplier, 1.0)
+        XCTAssertEqual(sut.labelScaleMultiplier, 1.0 / 0.3, accuracy: 0.01)
+    }
+    
+    func testLabelScaleInverseOfZoom() {
+        let zoomLevels = [0.5, 0.75, 1.0, 1.5, 2.0, 2.5]
+        for zoomLevel in zoomLevels {
+            sut.setZoomLevel(zoomLevel)
+            XCTAssertEqual(sut.labelScaleMultiplier, 1.0 / zoomLevel, accuracy: 0.001)
+        }
+    }
+    
+    // MARK: - Reset Tests
+    
+    func testResetZoom() {
+        sut.setZoomLevel(2.5)
+        sut.resetZoom()
+        
+        XCTAssertEqual(sut.zoomLevel, 1.0)
+        XCTAssertEqual(sut.minDistance, sut.defaultMinDistance)
+        XCTAssertEqual(sut.maxDistance, sut.defaultMaxDistance)
+        XCTAssertEqual(sut.labelScaleMultiplier, 1.0)
+    }
+    
+    func testResetZoomAfterComplexGestures() {
+        sut.updateZoomWithGesture(scaleFactor: 1.5)
+        sut.updateZoomWithGesture(scaleFactor: 0.8)
+        sut.setZoomLevel(2.2)
+        
+        sut.resetZoom()
+        
+        XCTAssertEqual(sut.zoomLevel, 1.0)
+        XCTAssertEqual(sut.labelScaleMultiplier, 1.0)
+    }
+    
+    // MARK: - Update Threshold Tests
+    
+    func testSmallZoomChangesIgnored() {
+        let initialZoom = sut.zoomLevel
+        let initialMinDistance = sut.minDistance
+        
+        sut.setZoomLevel(initialZoom + 0.005)  // Very small change
+        
+        // Should not update if change is less than 0.01 threshold
+        XCTAssertEqual(sut.zoomLevel, initialZoom)
+        XCTAssertEqual(sut.minDistance, initialMinDistance)
+    }
+    
+    func testMeaningfulZoomChangesApplied() {
+        let initialZoom = sut.zoomLevel
+        sut.setZoomLevel(initialZoom + 0.02)  // Change greater than 0.01 threshold
+        
+        XCTAssertNotEqual(sut.zoomLevel, initialZoom)
+    }
+    
+    // MARK: - State Consistency Tests
+    
+    func testStateConsistencyAfterMultipleUpdates() {
+        sut.setZoomLevel(1.5)
+        XCTAssertNotNil(sut.zoomLevel)
+        XCTAssertNotNil(sut.minDistance)
+        XCTAssertNotNil(sut.maxDistance)
+        XCTAssertNotNil(sut.labelScaleMultiplier)
+        
+        sut.updateZoomWithGesture(scaleFactor: 1.2)
+        XCTAssertNotNil(sut.zoomLevel)
+        XCTAssertNotNil(sut.minDistance)
+        XCTAssertNotNil(sut.maxDistance)
+        XCTAssertNotNil(sut.labelScaleMultiplier)
+    }
+    
+    func testSequentialZoomLevelSettings() {
+        let levels = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+        
+        for level in levels {
+            sut.setZoomLevel(level)
+            XCTAssertEqual(sut.zoomLevel, level, accuracy: 0.01)
+        }
+    }
+}
+
+// MARK: - ARLabelPositioner with Zoom Tests
+
+class ARLabelPositionerWithZoomTests: XCTestCase {
+    var zoomManager: ZoomGestureManager!
+    
+    override func setUp() {
+        super.setUp()
+        zoomManager = ZoomGestureManager()
+    }
+    
+    override func tearDown() {
+        zoomManager = nil
+        super.tearDown()
+    }
+    
+    func testPositionerWithDefaultZoom() {
+        let positioner = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        XCTAssertEqual(positioner.labelScaleMultiplier, 1.0)
+        XCTAssertEqual(positioner.minDistance, 100.0)
+        XCTAssertEqual(positioner.maxDistance, 50000.0)
+    }
+    
+    func testPositionerFontSizeWithZoom() {
+        // At default zoom
+        let positioner1 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        let defaultSize = positioner1.calculateFontSize(for: 5000)
+        
+        // At max zoom in (smaller labels)
+        zoomManager.setZoomLevel(0.3)
+        let positioner2 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        let zoomedInSize = positioner2.calculateFontSize(for: 5000)
+        
+        // At max zoom out (smaller labels)
+        zoomManager.setZoomLevel(3.0)
+        let positioner3 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        let zoomedOutSize = positioner3.calculateFontSize(for: 5000)
+        
+        // Zoom in should make labels larger
+        XCTAssertGreater(zoomedInSize, defaultSize)
+        
+        // Zoom out should make labels smaller
+        XCTAssertLess(zoomedOutSize, defaultSize)
+    }
+    
+    func testPositionerDisplayFiltersWithZoomedDistances() {
+        // At max zoom in, should show closer POIs
+        zoomManager.setZoomLevel(0.3)
+        let positioner1 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        // POI at 500m should be visible with zoom in (focuses on nearer)
+        XCTAssertTrue(positioner1.shouldDisplay(bearing: 0, heading: 0, distance: 500))
+        
+        // At max zoom out, should see farther POIs
+        zoomManager.setZoomLevel(3.0)
+        let positioner2 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        // POI at 80km should be visible with zoom out
+        XCTAssertTrue(positioner2.shouldDisplay(bearing: 0, heading: 0, distance: 80000))
+    }
+}
+
+// MARK: - Integration Tests for Zoom and AROverlay
+
+class ZoomAROverlayIntegrationTests: XCTestCase {
+    var zoomManager: ZoomGestureManager!
+    
+    override func setUp() {
+        super.setUp()
+        zoomManager = ZoomGestureManager()
+    }
+    
+    override func tearDown() {
+        zoomManager = nil
+        super.tearDown()
+    }
+    
+    func testZoomAffectsLabelVisibility() {
+        let pois = [
+            POILocation(name: "Close", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 500, bearing: 0),
+            POILocation(name: "Far", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .park, distance: 80000, bearing: 45),
+        ]
+        
+        // At default zoom
+        zoomManager.setZoomLevel(1.0)
+        let positioner1 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        let closeVisibleDefault = positioner1.shouldDisplay(bearing: pois[0].bearing, heading: 0, distance: pois[0].distance)
+        let farVisibleDefault = positioner1.shouldDisplay(bearing: pois[1].bearing, heading: 0, distance: pois[1].distance)
+        
+        // Close should be visible, far should not
+        XCTAssertTrue(closeVisibleDefault)
+        XCTAssertFalse(farVisibleDefault)
+        
+        // At max zoom out
+        zoomManager.setZoomLevel(3.0)
+        let positioner2 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        let closeVisibleZoomedOut = positioner2.shouldDisplay(bearing: pois[0].bearing, heading: 0, distance: pois[0].distance)
+        let farVisibleZoomedOut = positioner2.shouldDisplay(bearing: pois[1].bearing, heading: 0, distance: pois[1].distance)
+        
+        // Both should be visible when zoomed out
+        XCTAssertTrue(closeVisibleZoomedOut)
+        XCTAssertTrue(farVisibleZoomedOut)
+    }
+    
+    func testZoomAffectsLabelSize() {
+        let distance = 25000.0
+        
+        // At zoom in
+        zoomManager.setZoomLevel(0.3)
+        let positioner1 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        let sizeZoomedIn = positioner1.calculateFontSize(for: distance)
+        
+        // At default zoom
+        zoomManager.setZoomLevel(1.0)
+        let positioner2 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        let sizeDefault = positioner2.calculateFontSize(for: distance)
+        
+        // At zoom out
+        zoomManager.setZoomLevel(3.0)
+        let positioner3 = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        let sizeZoomedOut = positioner3.calculateFontSize(for: distance)
+        
+        // Size should decrease with zoom out
+        XCTAssertGreater(sizeZoomedIn, sizeDefault)
+        XCTAssertGreater(sizeDefault, sizeZoomedOut)
+    }
+    
+    func testSmoothZoomTransition() {
+        let distance = 5000.0
+        
+        var previousSize: CGFloat? = nil
+        let zoomSteps = stride(from: 0.3, through: 3.0, by: 0.1)
+        
+        for zoomLevel in zoomSteps {
+            zoomManager.setZoomLevel(zoomLevel)
+            let positioner = ARLabelPositioner(
+                screenWidth: 390,
+                screenHeight: 844,
+                minDistance: zoomManager.minDistance,
+                maxDistance: zoomManager.maxDistance,
+                labelScaleMultiplier: zoomManager.labelScaleMultiplier
+            )
+            let size = positioner.calculateFontSize(for: distance)
+            
+            if let prev = previousSize {
+                // Sizes should be monotonically decreasing as zoom out
+                XCTAssertLess(size, prev)
+            }
+            previousSize = size
+        }
+    }
+    
+    func testZoomGestureChain() {
+        let manager = ZoomGestureManager()
+        // Simulate a series of pinch gestures
+        manager.updateZoomWithGesture(scaleFactor: 1.2)  // Pinch out
+        manager.updateZoomWithGesture(scaleFactor: 1.2)  // Pinch out again
+        manager.updateZoomWithGesture(scaleFactor: 0.9)  // Pinch in
+        manager.updateZoomWithGesture(scaleFactor: 0.9)  // Pinch in again
+        
+        // Should have reasonable zoom level
+        XCTAssertGreaterThanOrEqual(manager.zoomLevel, manager.minZoomLevel)
+        XCTAssertLessThanOrEqual(manager.zoomLevel, manager.maxZoomLevel)
+    }
+    
+    func testCompleteZoomWorkflow() {
+        let poi = POILocation(
+            name: "Test POI",
+            coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0),
+            category: .landmark,
+            distance: 25000,
+            bearing: 0,
+            prominence: 0.8
+        )
+        
+        // Start at default zoom
+        var positioner = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        XCTAssertTrue(positioner.shouldDisplay(bearing: poi.bearing, heading: 0, distance: poi.distance))
+        let defaultSize = positioner.calculateFontSize(for: poi.distance)
+        
+        // Zoom in via gesture
+        zoomManager.updateZoomWithGesture(scaleFactor: 0.6)
+        positioner = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        let zoomedInSize = positioner.calculateFontSize(for: poi.distance)
+        XCTAssertGreater(zoomedInSize, defaultSize)
+        
+        // Zoom out via gesture
+        zoomManager.updateZoomWithGesture(scaleFactor: 2.0)
+        positioner = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        let zoomedOutSize = positioner.calculateFontSize(for: poi.distance)
+        XCTAssertLess(zoomedOutSize, defaultSize)
+        
+        // Reset zoom
+        zoomManager.resetZoom()
+        positioner = ARLabelPositioner(
+            screenWidth: 390,
+            screenHeight: 844,
+            minDistance: zoomManager.minDistance,
+            maxDistance: zoomManager.maxDistance,
+            labelScaleMultiplier: zoomManager.labelScaleMultiplier
+        )
+        
+        let resetSize = positioner.calculateFontSize(for: poi.distance)
+        XCTAssertEqual(resetSize, defaultSize, accuracy: 0.1)
+    }
+}

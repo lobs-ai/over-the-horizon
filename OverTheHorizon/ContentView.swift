@@ -14,6 +14,7 @@ struct ContentView: View {
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var locationManager = LocationManager()
     @StateObject private var motionManager = MotionManager()
+    @StateObject private var zoomGestureManager = ZoomGestureManager()
     @StateObject private var poiSearchManager: POISearchManager
     
     // UI State
@@ -25,6 +26,7 @@ struct ContentView: View {
         _poiSearchManager = StateObject(wrappedValue: POISearchManager(locationManager: locationMgr))
         _cameraManager = StateObject(wrappedValue: CameraManager())
         _motionManager = StateObject(wrappedValue: MotionManager())
+        _zoomGestureManager = StateObject(wrappedValue: ZoomGestureManager())
     }
 
     var body: some View {
@@ -34,8 +36,19 @@ struct ContentView: View {
                 .ignoresSafeArea()
             
             // AR overlay with POI labels
-            AROverlayView(pois: poiSearchManager.pois, heading: motionManager.heading)
-                .ignoresSafeArea()
+            AROverlayView(
+                pois: poiSearchManager.pois,
+                heading: motionManager.heading,
+                zoomGestureManager: zoomGestureManager
+            )
+            .ignoresSafeArea()
+            // Add pinch zoom gesture to the AR overlay
+            .gesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        zoomGestureManager.updateZoomWithGesture(scaleFactor: value)
+                    }
+            )
 
             VStack(alignment: .leading, spacing: 8) {
                 // Header
@@ -76,6 +89,14 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
+                
+                // Zoom Level Display
+                Text(String(format: "Zoom: %.2f (%.0f - %.0fm)", 
+                            zoomGestureManager.zoomLevel,
+                            zoomGestureManager.minDistance,
+                            zoomGestureManager.maxDistance / 1000))
+                    .font(.caption2)
+                    .foregroundColor(.cyan)
                 
                 // POI Search Status
                 if poiSearchManager.isSearching {

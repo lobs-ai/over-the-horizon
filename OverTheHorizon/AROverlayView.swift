@@ -19,12 +19,21 @@ struct AROverlayView: View {
     /// Current device heading in degrees
     let heading: Double?
     
+    /// Zoom gesture manager for distance range and label scaling
+    @ObservedObject var zoomGestureManager: ZoomGestureManager
+    
     /// Screen dimensions
     @State private var screenSize: CGSize = .zero
     
     /// Positioner for calculating label positions
     private var positioner: ARLabelPositioner {
-        ARLabelPositioner(screenWidth: screenSize.width, screenHeight: screenSize.height)
+        ARLabelPositioner(
+            screenWidth: screenSize.width,
+            screenHeight: screenSize.height,
+            minDistance: zoomGestureManager.minDistance,
+            maxDistance: zoomGestureManager.maxDistance,
+            labelScaleMultiplier: zoomGestureManager.labelScaleMultiplier
+        )
     }
     
     /// Overlap resolver for positioning non-overlapping labels
@@ -188,6 +197,7 @@ struct POILabelView: View {
                 prominence: 0.6
             )
         ],
-        heading: 0.0
+        heading: 0.0,
+        zoomGestureManager: ZoomGestureManager()
     )
 }

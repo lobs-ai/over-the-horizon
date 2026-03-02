@@ -17,13 +17,16 @@ struct ARLabelPositioner {
     /// Horizontal field of view in degrees
     static let horizontalFOV: Double = 45.0
     
-    /// Distance range for display (in meters)
-    let minDistance: CLLocationDistance = 100.0
-    let maxDistance: CLLocationDistance = 50000.0
-    
     /// Screen dimensions
     let screenWidth: CGFloat
     let screenHeight: CGFloat
+    
+    /// Distance range for display (in meters)
+    let minDistance: CLLocationDistance
+    let maxDistance: CLLocationDistance
+    
+    /// Label scale multiplier (1.0 = default, <1 = smaller, >1 = larger)
+    let labelScaleMultiplier: CGFloat
     
     /// Center of the screen in screen coordinates
     var screenCenter: CGPoint {
@@ -37,9 +40,18 @@ struct ARLabelPositioner {
     
     // MARK: - Initialization
     
-    init(screenWidth: CGFloat, screenHeight: CGFloat) {
+    init(
+        screenWidth: CGFloat,
+        screenHeight: CGFloat,
+        minDistance: CLLocationDistance = 100.0,
+        maxDistance: CLLocationDistance = 50000.0,
+        labelScaleMultiplier: CGFloat = 1.0
+    ) {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
+        self.minDistance = minDistance
+        self.maxDistance = maxDistance
+        self.labelScaleMultiplier = labelScaleMultiplier
     }
     
     // MARK: - Public Methods
@@ -119,7 +131,10 @@ struct ARLabelPositioner {
         let minSize: CGFloat = 10.0
         let maxSize: CGFloat = 24.0
         
-        return maxSize - (clampedDistance * (maxSize - minSize))
+        let baseFontSize = maxSize - (clampedDistance * (maxSize - minSize))
+        
+        // Apply zoom-based label scaling
+        return baseFontSize * labelScaleMultiplier
     }
     
     /// Calculates the opacity for a label based on distance from FOV edges.
