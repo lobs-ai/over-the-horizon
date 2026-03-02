@@ -1,1 +1,1 @@
-Reviewed Over the Horizon iOS AR app. Found 2 critical bugs (wrong heading reference frame makes AR non-functional; test compilation failures), 6 important issues (double launch search, settings not applied on load, duplicate StateObject inits, etc). Filed inbox item. Review written to review-notes.md.
+Reviewed Over the Horizon iOS AR app. Found 2 critical bugs (broken compass heading, non-compiling tests), 8 important issues, 5 suggestions. Review at review-notes.md. Inbox item filed.
