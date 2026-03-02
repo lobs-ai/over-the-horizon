@@ -1,118 +1,117 @@
 # Over the Horizon — Full App Review
-*Reviewed 2026-03-02*
+
+**Reviewer:** Agent (Reviewer)  
+**Date:** 2026-03-02  
+**Scope:** Full app review — spec compliance, Swift best practices, performance, edge cases, UX, privacy
 
 ---
 
 ## Summary
 
-Solid foundation with clean architecture and good test coverage for geometry/math. However, there are two critical bugs that undermine the app's core functionality: **the heading calculation is broken** (doesn't use compass) and **test file won't compile** (wrong initializer signatures). Several important issues with battery efficiency, search quality, and a data race also need attention.
+The app is well-structured with a clear separation of concerns. Core logic (positioning, scoring, overlap resolution) is solid and well-tested. Several important bugs exist, with one heading calculation issue that would cause the AR overlay to be non-functional in the real world. A few API misuses need fixing before shipping.
 
 ---
 
-## 🔴 Critical
+## 🔴 Critical Issues
 
-### 1. Heading is NOT compass-based — core feature is broken
-**File:** `MotionManager.swift`
+### 1. MotionManager heading is NOT compass-bearing — AR labels will point wrong direction
 
-`startDeviceMotionUpdates(to: .main)` uses the default reference frame `.xArbitraryZVertical` — an arbitrary frame with no relationship to magnetic north. `calculateHeading()` computes from `attitude.yaw`, but that yaw is relative to wherever the phone was pointed when the app launched.
+**File:** `MotionManager.swift`, `calculateHeading(from:)`
 
-AR labels are positioned relative to the phone's initial orientation, not compass north. Pointing north vs south shows the same labels in the same screen positions.
+`CMAttitude.yaw` is relative to the device's **arbitrary startup orientation**, not magnetic north. Turning the device will update `yaw`, but the zero-point is wherever the phone was pointing when the app launched. In practice, the AR labels will appear in totally wrong directions unless the user happens to launch while pointing north.
 
-**Fix:** Use `startDeviceMotionUpdates(using: .xMagneticNorthZVertical, to: .main)`, OR add heading support to `LocationManager` using `CLLocationManager.startUpdatingHeading()` which gives True/Magnetic heading directly (simpler and more reliable).
+**Fix:** Use `CLLocationManager.startUpdatingHeading()` (already has location permission) or initialize CMMotionManager with `startDeviceMotionUpdates(using: .xMagneticNorthZVertical)` to anchor yaw to magnetic north.
 
-### 2. Test file won't compile — wrong initializer signatures
+Also: `private let locationManager = CoreMotion.CMHeadingFilterValueDefault` is a dead variable storing a `Float` constant under a misleading name. Remove it.
+
+---
+
+### 2. ContentView.init() creates double instances of every StateObject
+
+**File:** `ContentView.swift`, `init()`
+
+Every @StateObject has both a property-declaration initializer AND is re-initialized in `init()`. Instance #1 is thrown away. For CameraManager this wastes a camera session; for POISearchManager this fires a discarded network search burst.
+
+**Fix:** Remove default initializers from property declarations when overriding in init():
+```swift
+@StateObject private var cameraManager: CameraManager
+@StateObject private var locationManager: LocationManager
+```
+
+---
+
+## 🟡 Important Issues
+
+### 3. Double search fires on startup
+
+**File:** `POISearchManager.swift`
+
+`init()` calls `setupPeriodicSearch()` (fires immediate search + starts timer), then `ContentView.onAppear` calls `startPeriodicSearch()` which calls `setupPeriodicSearch()` again (fires ANOTHER immediate search). 48 simultaneous MKLocalSearch requests at launch.
+
+**Fix:** Remove `setupPeriodicSearch()` call from `init()`.
+
+---
+
+### 4. Test file won't compile — AROverlayView/POILabelView init signature mismatches
+
 **File:** `OverTheHorizonTests.swift`
 
-`AROverlayView` requires `zoomGestureManager:` but tests call it without:
-```swift
-let view = AROverlayView(pois: [poi], heading: 0.0)  // missing zoomGestureManager
-```
-
-`POILabelView` requires `adjustedPosition:` and `zIndex:` but tests omit them:
-```swift
-let view = POILabelView(poi: poi, heading: 0.0, positioner: positioner)  // missing params
-```
-
-These tests fail to compile. Update to match actual initializers.
+Tests create `AROverlayView(pois: [poi], heading: 0.0)` missing required `zoomGestureManager:` parameter. `POILabelView` tests missing `adjustedPosition:` and `zIndex:` params.
 
 ---
 
-## 🟡 Important
+### 5. MKLocalSearch uses natural language instead of POI category filters
 
-### 3. POI search uses natural language instead of category filters
 **File:** `POISearchManager.swift`
 
-```swift
-searchRequest.naturalLanguageQuery = category.rawValue  // "landmark", "museum"...
-```
+`naturalLanguageQuery = category.rawValue` ("landmark", "museum") returns inconsistent results. `LocationCategory.mkCategory` is defined but never used.
 
-`LocationCategory` already has `mkCategory` mapping to `MKPointOfInterestCategory`. Natural language is noisy and slow. Use `MKLocalPointsOfInterestRequest` with `pointOfInterestFilter` instead.
+**Fix:** Use `MKLocalSearch.Request.pointOfInterestFilter` with `.including([category.mkCategory])`.
 
-### 4. Dead/misleading variable in MotionManager
-**File:** `MotionManager.swift`
+---
 
-```swift
-private let locationManager = CoreMotion.CMHeadingFilterValueDefault
-```
-Stores the Double constant 1.0 in a variable named `locationManager`. Never used. Delete it.
+### 6. Overlap detection uses hardcoded 60pt label width
 
-### 5. Redundant DispatchQueue.main.async in MotionManager
-**File:** `MotionManager.swift`
+**File:** `OverlapResolver.swift`
 
-`startDeviceMotionUpdates(to: .main)` already delivers on main. The inner `DispatchQueue.main.async` is redundant and misleading.
+Long POI names (e.g., "Philadelphia Museum of Art") are far wider than 60pt. Dense areas will still show visible overlaps.
 
-### 6. Concurrent search race condition
-**File:** `POISearchManager.swift`
+---
 
-`searchPOIs()` can be called concurrently from the timer, settings dismissal, and init. The `isSearching` flag is set asynchronously and doesn't prevent concurrent execution. Two searches racing to write `self.pois` is wasteful and can produce inconsistent state. Add an `isSearching` guard at the top of `searchPOIs()`.
+### 7. SettingsManager loads state asynchronously from init
 
-### 7. Settings always trigger full re-search on dismiss
-**File:** `ContentView.swift`
+**File:** `SettingsManager.swift`
 
-`onDisappear` on SettingsView fires a full POI search every time, even if nothing changed. Cache enabled categories before presenting the modal and only re-search if they changed.
-
-### 8. Info.plist declares Always Location permission but only WhenInUse is requested
-**File:** `Info.plist`, `LocationManager.swift`
-
-`NSLocationAlwaysAndWhenInUseUsageDescription` is present but the code only calls `requestWhenInUseAuthorization()`. Apple may flag this. Remove it unless background location is actually needed.
-
-### 9. POI bearing/distance goes stale between searches
-**File:** `POILocation.swift`
-
-Bearing and distance are fixed at search time. With a 500m threshold and 30s timer, a user walking briskly will see AR labels pointing wrong directions. Bearing should be recomputed each frame from current `userLocation`.
-
-### 10. Initial search fires before location permission is granted
-**File:** `POISearchManager.swift`
-
-`setupPeriodicSearch()` calls `searchPOIs()` immediately in init, before any permission has been requested. This always shows a red "Error: User location not available" on first launch. Show a neutral loading state instead.
+`loadEnabledCategories()` wraps the state assignment in `DispatchQueue.main.async`, leaving `enabledCategories` empty until the next run loop. Synchronous read right after init returns empty list.
 
 ---
 
 ## 🔵 Suggestions
 
-### 11. screenSize starts at .zero — first-frame label flash
-`@State private var screenSize: CGSize = .zero` means all labels start at (0,0) until `onAppear`. Guard against zero size before rendering labels.
-
-### 12. SettingsManager async init inconsistency
-`loadEnabledCategories()` sets `enabledCategories` via `DispatchQueue.main.async`. Right after `init()` returns, `enabledCategories` is empty. Set it synchronously in init.
-
-### 13. ContentView @StateObject property declaration redundancy
-Properties declared with `= LocationManager()` and then overridden in `init()`. The default values are dead code. Declare as `@StateObject private var locationManager: LocationManager` (no default) to avoid confusion.
-
-### 14. No visual feedback in AR overlay when 0 POIs visible
-When no POIs are in the FOV, the overlay is completely transparent. A subtle indicator would help users understand the app is working.
-
-### 15. Zoom UX direction is counterintuitive
-Pinch out = see farther (opposite of typical map behavior where pinch out = zoom in). Worth noting and potentially adding a preference.
+- `CameraPreviewView` uses deprecated `UIScreen.main.bounds` (iOS 16+ deprecated)
+- Zoom direction is counterintuitive: pinch-out makes labels smaller (opposite of every map app)
+- No heading smoothing — CMMotion at 10Hz without low-pass filter will cause label jitter
+- POI distances/bearings go stale until 500m movement threshold — consider a softer refresh at 100m
 
 ---
 
 ## ✅ What's Done Well
 
-- **Clean separation of concerns** — managers are well-isolated.
-- **Overlap resolution** — priority-based vertical offset resolver handles edge cases correctly.
-- **POI scoring** — weighted multi-factor scoring is well-designed.
-- **Test coverage breadth** — good coverage of geometry, zoom, settings, and overlap (modulo compile errors).
-- **Privacy** — only required permissions; all data stays on-device. ✓
-- **ZoomGestureManager** — incremental gesture delta calculation avoids cumulative drift. ✓
-- **Memory management** — `[weak self]` used consistently in async callbacks. ✓
+- ARLabelPositioner: clean FOV math, correct 0/360° wraparound handling
+- POIScorer: well-designed with clear weighting rationale, properly normalized
+- OverlapResolver: priority-based algorithm is the right approach
+- Test coverage is excellent in breadth across all major classes
+- ZoomGestureManager: correct incremental delta handling for MagnificationGesture
+- Privacy: no external data, permissions scoped correctly. Clean.
+
+---
+
+## Fix Priority
+
+1. 🔴 Heading calculation (app non-functional without this)
+2. 🔴 Double StateObject init in ContentView
+3. 🟡 Double search on startup  
+4. 🟡 Test compilation errors
+5. 🟡 Use MKPointOfInterestCategory filters
+6. 🟡 SettingsManager async init
+7. 🟡 Overlap label width estimate
