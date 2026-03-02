@@ -1,1 +1,1 @@
-Reviewed Over the Horizon iOS AR app. Found 2 critical bugs (broken heading, dead code), 10 important issues (overlap detection, screen size init, double search, permission UX, etc.), 4 suggestions. Filed inbox note and wrote review-notes.md.
+Reviewed Over the Horizon iOS AR app (16 Swift files). 2 critical bugs (broken heading reference frame, dead misleading code), 10 important issues (overlap bounds, double search init, async/GCD mix, POI ID churn, screenSize zero, permission UX). Filed inbox suggestion.
