@@ -1,55 +1,49 @@
-# Diagnostic Review — Apple Maps POI Search + Location Data Model
+# Diagnostic Review: Apple Maps POI Search + Location Data Model
 
-**Task ID:** `313AC40E-E9AB-4621-B967-93BA7D106B4A`  
+**Task:** `313AC40E-E9AB-4621-B967-93BA7D106B4A`  
 **Date:** 2026-03-02
 
----
+## Root Cause of Failure
 
-## Root Cause of Failures
+**The task actually succeeded.** The "Session not found" error is an orchestrator-level session tracking issue — programmer agent sessions were crashing/timing out at the infra level, causing the orchestrator to mark them as failures even though code was committed.
 
-**The task actually succeeded.** All required code is present:
+All three required files exist and are complete:
+- `OverTheHorizon/LocationCategory.swift` — full enum with all 25 categories
+- `OverTheHorizon/POILocation.swift` — complete model with bearing/distance calculation  
+- `OverTheHorizon/POISearchManager.swift` — full MKLocalSearch implementation
 
-- `LocationCategory.swift` — Full enum with all 25 categories, no restaurants/food
-- `POILocation.swift` — Data model with name, coordinate, category, distance, bearing, prominence
-- `POISearchManager.swift` — MKLocalSearch integration, configurable radius, periodic re-search on movement
+## Code Review Findings
 
-The "Session not found" error is an **orchestration infrastructure error** — the programmer agent completed the work but the session tracking it died (timeout/crash), so the orchestrator never received the success signal and retried unnecessarily.
+### ✅ What's Good
+- `LocationCategory` covers all required types and correctly excludes restaurants/food
+- `POILocation.calculateBearing()` uses correct spherical math
+- `POISearchManager` handles periodic re-search on significant movement (500m threshold)
+- Search radius is configurable (1–5 miles, default 5)
+- Error handling present per-category
+- `@available(iOS 17.0, *)` guard on `mkCategory`
 
----
+### 🟡 Issues Found
 
-## Code Quality
+**1. `mkCategory` defined but unused — natural language query used instead**  
+`searchCategory()` uses `naturalLanguageQuery = category.rawValue` (raw string) instead of `MKPointOfInterestFilter`. This means category filtering is approximate and could return food/restaurant results anyway. Should use `MKLocalPointOfInterestFilter(including:)` with mapped `MKPointOfInterestCategory` values.
 
-### Good ✅
-- `LocationCategory.mkCategory` mapping handles Apple API gaps reasonably
-- Bearing math (atan2 spherical) is correct
-- searchRadiusMiles clamped to 1-5 mi
-- Proper @Published / ObservableObject pattern
+**2. No deduplication of POI results**  
+Searching 25 categories separately will return many duplicate real-world places (e.g. a national park appears under park, trailhead, viewpoint, landmark). Each gets a new UUID so deduplication never happens. Deduplicate by coordinate proximity before appending.
 
-### Issues Found
+**3. Timer scheduling may fail off main thread**  
+`setupPeriodicSearch()` is called from `init`. `Timer.scheduledTimer` requires a run loop. If init isn't on main thread, the timer silently never fires.
 
-#### 🟡 25 sequential MKLocalSearch calls (one per category)
-`searchCategory()` fires 25 separate NL queries. Rate-limit risk, very slow.
-**Fix:** Use `MKLocalPointOfInterestFilter(including:)` with `pointOfInterestFilter` on the request — batch into 1-2 searches.
+**4. Missing tests**  
+No tests for `calculateBearing`, `calculateDistance`, category mapping, or search manager logic.
 
-#### 🟡 naturalLanguageQuery used instead of category filter
-The `mkCategory` mappings on `LocationCategory` exist but are unused. NL queries for "viewpoint", "ferry terminal" etc. are unreliable.
-**Fix:** Switch to filter-based search using the existing `mkCategory` mappings.
-
-#### 🔵 No deduplication
-Same POI can appear across multiple category searches. No coordinate+name dedup.
-
----
+### 🔵 Minor
+- `campground` grouped under `.sportsAndRecreation` — should be `.natureAndOutdoors`
+- `ferryTerminal` maps to `.park` in mkCategory with no comment explaining the fallback
 
 ## Recommendation
 
-**The original task is DONE. Do not retry it.**
+**Do NOT retry the original task** — the code is already implemented. The "Session not found" error is an orchestrator/infra bug, not a code failure.
 
-Mark it complete. Create a follow-up task for search efficiency.
+**Create follow-up programmer task** for issues #1 (use MKPointOfInterestFilter) and #2 (deduplication) as they affect search correctness.
 
----
-
-## Handoff (for programmer)
-
-Fix POISearchManager to use MKLocalPointOfInterestFilter instead of 25 NL queries.
-Use the existing `mkCategory` mappings. Add deduplication by coordinate+name.
-Files: POISearchManager.swift, LocationCategory.swift
+**Infra fix needed:** Orchestrator should classify "Session not found" as an infra error and not count it as agent failure retries.
