@@ -95,7 +95,7 @@ class ZoomGestureManager: NSObject, ObservableObject {
         // At zoom 0.3: ~30 meters, At zoom 1.0: 100 meters, At zoom 3.0: 300 meters
         minDistance = max(
             absoluteMinDistance,
-            defaultMinDistance / zoomFactor
+            defaultMinDistance * zoomFactor
         )
         
         // Max distance increases with zoom out (see farther)

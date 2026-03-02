@@ -2292,3 +2292,82 @@ class IncrementalZoomGestureTests: XCTestCase {
         XCTAssertLess(zoomedInRange, zoomedOutRange)
     }
 }
+
+// MARK: - Distance Range Correctness Tests
+
+class DistanceRangeCorrectnessTests: XCTestCase {
+    var sut: ZoomGestureManager!
+    
+    override func setUp() {
+        super.setUp()
+        sut = ZoomGestureManager()
+    }
+    
+    override func tearDown() {
+        sut = nil
+        super.tearDown()
+    }
+    
+    // MARK: - Min Distance Calculation Tests
+    
+    func testMinDistanceFormula() {
+        // Test that minDistance = defaultMinDistance * zoomFactor
+        sut.setZoomLevel(0.3)
+        let expectedMinAt03 = 100.0 * 0.3  // 30m
+        XCTAssertEqual(sut.minDistance, expectedMinAt03, accuracy: 0.1)
+        
+        sut.setZoomLevel(1.0)
+        let expectedMinAt10 = 100.0 * 1.0  // 100m
+        XCTAssertEqual(sut.minDistance, expectedMinAt10, accuracy: 0.1)
+        
+        sut.setZoomLevel(3.0)
+        let expectedMinAt30 = 100.0 * 3.0  // 300m
+        XCTAssertEqual(sut.minDistance, expectedMinAt30, accuracy: 0.1)
+    }
+    
+    func testMaxDistanceFormula() {
+        // Test that maxDistance = defaultMaxDistance * zoomFactor
+        sut.setZoomLevel(0.3)
+        let expectedMaxAt03 = 50000.0 * 0.3  // 15km
+        XCTAssertEqual(sut.maxDistance, expectedMaxAt03, accuracy: 10.0)
+        
+        sut.setZoomLevel(1.0)
+        let expectedMaxAt10 = 50000.0 * 1.0  // 50km
+        XCTAssertEqual(sut.maxDistance, expectedMaxAt10, accuracy: 10.0)
+        
+        sut.setZoomLevel(3.0)
+        let expectedMaxAt30 = 50000.0 * 3.0  // 150km
+        XCTAssertEqual(sut.maxDistance, expectedMaxAt30, accuracy: 10.0)
+    }
+    
+    func testZoomInDecreasesBothDistances() {
+        // Zoom in (0.3): both distances should be LESS than default
+        sut.setZoomLevel(0.3)
+        XCTAssertLess(sut.minDistance, sut.defaultMinDistance)
+        XCTAssertLess(sut.maxDistance, sut.defaultMaxDistance)
+        
+        // Specifically, they should be 30% of default
+        XCTAssertEqual(sut.minDistance, 30.0, accuracy: 0.1)
+        XCTAssertEqual(sut.maxDistance, 15000.0, accuracy: 10.0)
+    }
+    
+    func testZoomOutIncreasesBothDistances() {
+        // Zoom out (3.0): both distances should be MORE than default
+        sut.setZoomLevel(3.0)
+        XCTAssertGreater(sut.minDistance, sut.defaultMinDistance)
+        XCTAssertGreater(sut.maxDistance, sut.defaultMaxDistance)
+        
+        // Specifically, they should be 300% of default
+        XCTAssertEqual(sut.minDistance, 300.0, accuracy: 0.1)
+        XCTAssertEqual(sut.maxDistance, 150000.0, accuracy: 10.0)
+    }
+    
+    func testMinDistanceAlwaysLessThanMax() {
+        // Verify the invariant: minDistance < maxDistance for all zoom levels
+        for zoomLevel in stride(from: 0.3, through: 3.0, by: 0.1) {
+            sut.setZoomLevel(zoomLevel)
+            XCTAssertLess(sut.minDistance, sut.maxDistance,
+                         "At zoom \(zoomLevel): min (\(sut.minDistance)) should be < max (\(sut.maxDistance))")
+        }
+    }
+}
