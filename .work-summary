@@ -1,1 +1,1 @@
-Reviewed over-the-horizon iOS AR app. Found 2 critical issues (broken compass heading from CMMotion, non-compiling test target), 5 important issues (double init, zoom label bug, timer runloop, overlap resolver, clamp naming). Filed review-notes.md and inbox item.
+Reviewed Over the Horizon iOS AR app. Found 3 critical (broken heading sensor, test compile errors, startup ignores saved settings), 7 important, 5 suggestions. Full notes at review-notes.md. Inbox item filed.
