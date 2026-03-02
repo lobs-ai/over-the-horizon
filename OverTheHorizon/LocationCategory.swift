@@ -47,6 +47,34 @@ enum LocationCategory: String, CaseIterable, Codable {
     case governmentBuilding = "government building"
     case publicSpace = "public space"
     
+    /// Represents a grouping of related categories
+    enum Group: String, CaseIterable {
+        case landmarksAndCulture = "Landmarks and Culture"
+        case natureAndOutdoors = "Nature and Outdoors"
+        case entertainmentAndAttractions = "Entertainment and Attractions"
+        case sportsAndRecreation = "Sports and Recreation"
+        case travelAndInfrastructure = "Travel and Infrastructure"
+        case civicAndPublicInterest = "Civic and Public Interest"
+    }
+    
+    /// Returns the group this category belongs to
+    var group: LocationCategory.Group {
+        switch self {
+        case .landmark, .monument, .museum, .historicSite:
+            return .landmarksAndCulture
+        case .park, .beach, .viewpoint, .trailhead:
+            return .natureAndOutdoors
+        case .amusementPark, .zoo, .aquarium, .theater, .venue, .stadium, .golfCourse, .recreationFacility:
+            return .entertainmentAndAttractions
+        case .campground:
+            return .sportsAndRecreation
+        case .airport, .trainStation, .ferryTerminal:
+            return .travelAndInfrastructure
+        case .library, .university, .governmentBuilding, .publicSpace:
+            return .civicAndPublicInterest
+        }
+    }
+    
     /// Return a human-readable display name for the category.
     var displayName: String {
         switch self {

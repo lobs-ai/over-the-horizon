@@ -2371,3 +2371,322 @@ class DistanceRangeCorrectnessTests: XCTestCase {
         }
     }
 }
+
+// MARK: - SettingsManager Tests
+
+class SettingsManagerTests: XCTestCase {
+    var sut: SettingsManager!
+    
+    override func setUp() {
+        super.setUp()
+        sut = SettingsManager()
+        // Clear UserDefaults for clean test state
+        UserDefaults.standard.removeObject(forKey: "enabledCategories")
+    }
+    
+    override func tearDown() {
+        sut = nil
+        UserDefaults.standard.removeObject(forKey: "enabledCategories")
+        super.tearDown()
+    }
+    
+    // MARK: - Initialization Tests
+    
+    func testSettingsManagerInitialization() {
+        XCTAssertNotNil(sut)
+        XCTAssertFalse(sut.enabledCategories.isEmpty)
+    }
+    
+    func testAllCategoriesEnabledByDefault() {
+        for category in LocationCategory.allCases {
+            XCTAssertTrue(sut.isEnabled(category), "Category \(category.displayName) should be enabled by default")
+        }
+    }
+    
+    func testEnabledCategoriesDictionary() {
+        for category in LocationCategory.allCases {
+            let isEnabled = sut.enabledCategories[category.rawValue] ?? true
+            XCTAssertTrue(isEnabled, "Dictionary should show \(category.displayName) as enabled")
+        }
+    }
+    
+    // MARK: - Toggle Tests
+    
+    func testToggleCategoryOnToOff() {
+        let category = LocationCategory.landmark
+        XCTAssertTrue(sut.isEnabled(category))
+        
+        sut.toggleCategory(category)
+        XCTAssertFalse(sut.isEnabled(category))
+    }
+    
+    func testToggleCategoryOffToOn() {
+        let category = LocationCategory.landmark
+        sut.toggleCategory(category)
+        XCTAssertFalse(sut.isEnabled(category))
+        
+        sut.toggleCategory(category)
+        XCTAssertTrue(sut.isEnabled(category))
+    }
+    
+    func testToggleMultipleCategories() {
+        let cat1 = LocationCategory.landmark
+        let cat2 = LocationCategory.museum
+        let cat3 = LocationCategory.park
+        
+        sut.toggleCategory(cat1)
+        sut.toggleCategory(cat2)
+        sut.toggleCategory(cat3)
+        
+        XCTAssertFalse(sut.isEnabled(cat1))
+        XCTAssertFalse(sut.isEnabled(cat2))
+        XCTAssertFalse(sut.isEnabled(cat3))
+        
+        // Others should still be enabled
+        XCTAssertTrue(sut.isEnabled(LocationCategory.airport))
+    }
+    
+    // MARK: - Set Enabled Tests
+    
+    func testSetEnabledTrue() {
+        let category = LocationCategory.landmark
+        sut.setEnabled(category, true)
+        XCTAssertTrue(sut.isEnabled(category))
+    }
+    
+    func testSetEnabledFalse() {
+        let category = LocationCategory.landmark
+        sut.setEnabled(category, false)
+        XCTAssertFalse(sut.isEnabled(category))
+    }
+    
+    func testSetEnabledToggle() {
+        let category = LocationCategory.landmark
+        
+        sut.setEnabled(category, false)
+        XCTAssertFalse(sut.isEnabled(category))
+        
+        sut.setEnabled(category, true)
+        XCTAssertTrue(sut.isEnabled(category))
+    }
+    
+    // MARK: - Get Enabled Categories Tests
+    
+    func testGetEnabledCategoriesDefault() {
+        let enabled = sut.getEnabledCategories()
+        XCTAssertEqual(enabled.count, LocationCategory.allCases.count)
+    }
+    
+    func testGetEnabledCategoriesAfterDisabling() {
+        sut.setEnabled(LocationCategory.landmark, false)
+        sut.setEnabled(LocationCategory.museum, false)
+        
+        let enabled = sut.getEnabledCategories()
+        XCTAssertEqual(enabled.count, LocationCategory.allCases.count - 2)
+        
+        XCTAssertFalse(enabled.contains(LocationCategory.landmark))
+        XCTAssertFalse(enabled.contains(LocationCategory.museum))
+        XCTAssertTrue(enabled.contains(LocationCategory.park))
+    }
+    
+    func testGetEnabledCategoriesEmpty() {
+        sut.disableAll()
+        let enabled = sut.getEnabledCategories()
+        XCTAssertEqual(enabled.count, 0)
+    }
+    
+    // MARK: - Enable/Disable All Tests
+    
+    func testEnableAll() {
+        sut.disableAll()
+        XCTAssertEqual(sut.getEnabledCategories().count, 0)
+        
+        sut.enableAll()
+        XCTAssertEqual(sut.getEnabledCategories().count, LocationCategory.allCases.count)
+    }
+    
+    func testDisableAll() {
+        XCTAssertEqual(sut.getEnabledCategories().count, LocationCategory.allCases.count)
+        
+        sut.disableAll()
+        XCTAssertEqual(sut.getEnabledCategories().count, 0)
+    }
+    
+    func testEnableAllAfterMultipleToggles() {
+        for category in LocationCategory.allCases.prefix(5) {
+            sut.toggleCategory(category)
+        }
+        
+        let enabledBefore = sut.getEnabledCategories().count
+        XCTAssertLess(enabledBefore, LocationCategory.allCases.count)
+        
+        sut.enableAll()
+        
+        let enabledAfter = sut.getEnabledCategories().count
+        XCTAssertEqual(enabledAfter, LocationCategory.allCases.count)
+    }
+    
+    // MARK: - Reset Tests
+    
+    func testResetToDefaults() {
+        sut.disableAll()
+        XCTAssertEqual(sut.getEnabledCategories().count, 0)
+        
+        sut.resetToDefaults()
+        XCTAssertEqual(sut.getEnabledCategories().count, LocationCategory.allCases.count)
+    }
+    
+    // MARK: - Persistence Tests
+    
+    func testPersistenceAfterToggle() {
+        let category = LocationCategory.landmark
+        sut.toggleCategory(category)
+        
+        // Create new instance to test persistence
+        let newInstance = SettingsManager()
+        XCTAssertFalse(newInstance.isEnabled(category))
+    }
+    
+    func testPersistenceAfterMultipleChanges() {
+        sut.setEnabled(LocationCategory.landmark, false)
+        sut.setEnabled(LocationCategory.museum, false)
+        sut.setEnabled(LocationCategory.park, true)
+        
+        let newInstance = SettingsManager()
+        XCTAssertFalse(newInstance.isEnabled(LocationCategory.landmark))
+        XCTAssertFalse(newInstance.isEnabled(LocationCategory.museum))
+        XCTAssertTrue(newInstance.isEnabled(LocationCategory.park))
+    }
+    
+    func testPersistenceAfterEnableAll() {
+        sut.disableAll()
+        sut.enableAll()
+        
+        let newInstance = SettingsManager()
+        XCTAssertEqual(newInstance.getEnabledCategories().count, LocationCategory.allCases.count)
+    }
+    
+    // MARK: - Category Group Tests
+    
+    func testLandmarksAndCultureGroup() {
+        let group = LocationCategory.Group.landmarksAndCulture
+        let categories = LocationCategory.allCases.filter { $0.group == group }
+        
+        XCTAssertGreaterThan(categories.count, 0)
+        XCTAssert(categories.contains(LocationCategory.landmark))
+        XCTAssert(categories.contains(LocationCategory.museum))
+    }
+    
+    func testNatureAndOutdoorsGroup() {
+        let group = LocationCategory.Group.natureAndOutdoors
+        let categories = LocationCategory.allCases.filter { $0.group == group }
+        
+        XCTAssertGreaterThan(categories.count, 0)
+        XCTAssert(categories.contains(LocationCategory.park))
+        XCTAssert(categories.contains(LocationCategory.beach))
+    }
+    
+    func testEntertainmentAndAttractionsGroup() {
+        let group = LocationCategory.Group.entertainmentAndAttractions
+        let categories = LocationCategory.allCases.filter { $0.group == group }
+        
+        XCTAssertGreaterThan(categories.count, 0)
+        XCTAssert(categories.contains(LocationCategory.zoo))
+        XCTAssert(categories.contains(LocationCategory.theater))
+    }
+    
+    func testSportsAndRecreationGroup() {
+        let group = LocationCategory.Group.sportsAndRecreation
+        let categories = LocationCategory.allCases.filter { $0.group == group }
+        
+        XCTAssertGreaterThan(categories.count, 0)
+    }
+    
+    func testTravelAndInfrastructureGroup() {
+        let group = LocationCategory.Group.travelAndInfrastructure
+        let categories = LocationCategory.allCases.filter { $0.group == group }
+        
+        XCTAssertGreaterThan(categories.count, 0)
+        XCTAssert(categories.contains(LocationCategory.airport))
+        XCTAssert(categories.contains(LocationCategory.trainStation))
+    }
+    
+    func testCivicAndPublicInterestGroup() {
+        let group = LocationCategory.Group.civicAndPublicInterest
+        let categories = LocationCategory.allCases.filter { $0.group == group }
+        
+        XCTAssertGreaterThan(categories.count, 0)
+        XCTAssert(categories.contains(LocationCategory.library))
+        XCTAssert(categories.contains(LocationCategory.university))
+    }
+    
+    func testAllCategoriesHaveGroup() {
+        for category in LocationCategory.allCases {
+            let group = category.group
+            XCTAssertNotNil(group, "Category \(category.displayName) should have a group")
+        }
+    }
+    
+    func testGroupsAreComplete() {
+        var categoriesByGroup: [LocationCategory.Group: [LocationCategory]] = [:]
+        
+        for category in LocationCategory.allCases {
+            if categoriesByGroup[category.group] == nil {
+                categoriesByGroup[category.group] = []
+            }
+            categoriesByGroup[category.group]?.append(category)
+        }
+        
+        // All 6 groups should be present
+        XCTAssertEqual(categoriesByGroup.count, 6)
+        
+        // All categories should be accounted for
+        let totalCategories = categoriesByGroup.values.reduce(0) { $0 + $1.count }
+        XCTAssertEqual(totalCategories, LocationCategory.allCases.count)
+    }
+    
+    func testNoGroupOverlap() {
+        var seenCategories = Set<LocationCategory>()
+        
+        for group in LocationCategory.Group.allCases {
+            let categories = LocationCategory.allCases.filter { $0.group == group }
+            
+            for category in categories {
+                XCTAssertFalse(seenCategories.contains(category), "Category \(category.displayName) appears in multiple groups")
+                seenCategories.insert(category)
+            }
+        }
+    }
+    
+    // MARK: - Settings with Groups Tests
+    
+    func testToggleGroupByDisablingAll() {
+        let group = LocationCategory.Group.landmarksAndCulture
+        let groupCategories = LocationCategory.allCases.filter { $0.group == group }
+        
+        for category in groupCategories {
+            sut.setEnabled(category, false)
+        }
+        
+        let enabled = sut.getEnabledCategories()
+        for category in groupCategories {
+            XCTAssertFalse(enabled.contains(category))
+        }
+    }
+    
+    func testToggleGroupByEnablingAll() {
+        sut.disableAll()
+        
+        let group = LocationCategory.Group.entertainmentAndAttractions
+        let groupCategories = LocationCategory.allCases.filter { $0.group == group }
+        
+        for category in groupCategories {
+            sut.setEnabled(category, true)
+        }
+        
+        let enabled = sut.getEnabledCategories()
+        for category in groupCategories {
+            XCTAssertTrue(enabled.contains(category))
+        }
+    }
+}

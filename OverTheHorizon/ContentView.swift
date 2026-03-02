@@ -15,10 +15,12 @@ struct ContentView: View {
     @StateObject private var locationManager = LocationManager()
     @StateObject private var motionManager = MotionManager()
     @StateObject private var zoomGestureManager = ZoomGestureManager()
+    @StateObject private var settingsManager = SettingsManager()
     @StateObject private var poiSearchManager: POISearchManager
     
     // UI State
     @State private var showPOIList = false
+    @State private var showSettings = false
     
     // Pinch gesture tracking for incremental zoom updates
     @State private var lastMagnificationScale: CGFloat = 1.0
@@ -30,6 +32,7 @@ struct ContentView: View {
         _cameraManager = StateObject(wrappedValue: CameraManager())
         _motionManager = StateObject(wrappedValue: MotionManager())
         _zoomGestureManager = StateObject(wrappedValue: ZoomGestureManager())
+        _settingsManager = StateObject(wrappedValue: SettingsManager())
     }
 
     var body: some View {
@@ -70,6 +73,13 @@ struct ContentView: View {
                         .foregroundColor(.white)
                     
                     Spacer()
+                    
+                    // Settings button (gear icon)
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gear")
+                            .foregroundColor(.white)
+                            .font(.body)
+                    }
                     
                     // POI button
                     Button(action: { showPOIList.toggle() }) {
@@ -135,6 +145,16 @@ struct ContentView: View {
                 POIListView(poiSearchManager: poiSearchManager, showPOIList: $showPOIList)
                     .transition(.move(edge: .trailing))
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(settingsManager: settingsManager, isPresented: $showSettings)
+                .onDisappear {
+                    // Apply settings immediately when dismissed
+                    let enabledCategories = settingsManager.getEnabledCategories()
+                    Task {
+                        await poiSearchManager.searchPOIs(for: enabledCategories)
+                    }
+                }
         }
         .onAppear {
             cameraManager.requestCameraPermission()
