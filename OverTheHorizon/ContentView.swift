@@ -32,6 +32,10 @@ struct ContentView: View {
             // Live camera feed as background
             CameraPreviewView(manager: cameraManager)
                 .ignoresSafeArea()
+            
+            // AR overlay with POI labels
+            AROverlayView(pois: poiSearchManager.pois, heading: motionManager.heading)
+                .ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 8) {
                 // Header

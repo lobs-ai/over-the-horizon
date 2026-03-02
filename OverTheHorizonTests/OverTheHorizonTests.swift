@@ -533,3 +533,465 @@ class POIIntegrationTests: XCTestCase {
         XCTAssertEqual(pois[2].name, "Far POI")
     }
 }
+
+// MARK: - ARLabelPositioner Tests
+
+class ARLabelPositionerTests: XCTestCase {
+    var positioner: ARLabelPositioner!
+    
+    override func setUp() {
+        super.setUp()
+        // Standard iPhone screen size
+        positioner = ARLabelPositioner(screenWidth: 390, screenHeight: 844)
+    }
+    
+    override func tearDown() {
+        positioner = nil
+        super.tearDown()
+    }
+    
+    // MARK: - Basic Initialization Tests
+    
+    func testPositionerInitialization() {
+        XCTAssertNotNil(positioner)
+        XCTAssertEqual(positioner.screenWidth, 390)
+        XCTAssertEqual(positioner.screenHeight, 844)
+    }
+    
+    func testScreenCenterCalculation() {
+        let center = positioner.screenCenter
+        XCTAssertEqual(center.x, 195)
+        XCTAssertEqual(center.y, 422)
+    }
+    
+    func testFOVScreenWidth() {
+        let fovWidth = positioner.fovScreenWidth
+        XCTAssertEqual(fovWidth, 390 * 0.9)
+    }
+    
+    // MARK: - Display Visibility Tests
+    
+    func testShouldDisplayWithinDistanceRange() {
+        // At center heading with valid distance
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: 0, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: 0, distance: 100))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: 0, distance: 50000))
+    }
+    
+    func testShouldNotDisplayOutsideDistanceRange() {
+        // Too close
+        XCTAssertFalse(positioner.shouldDisplay(bearing: 0, heading: 0, distance: 50))
+        
+        // Too far
+        XCTAssertFalse(positioner.shouldDisplay(bearing: 0, heading: 0, distance: 60000))
+    }
+    
+    func testShouldDisplayWithinFOVArc() {
+        let heading = 0.0
+        
+        // Within FOV (45 degrees, ±22.5 from heading)
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: heading, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 22.4, heading: heading, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 337.6, heading: heading, distance: 5000)) // -22.4°
+    }
+    
+    func testShouldNotDisplayOutsideFOVArc() {
+        let heading = 0.0
+        
+        // Outside FOV
+        XCTAssertFalse(positioner.shouldDisplay(bearing: 30, heading: heading, distance: 5000))
+        XCTAssertFalse(positioner.shouldDisplay(bearing: 330, heading: heading, distance: 5000))
+        XCTAssertFalse(positioner.shouldDisplay(bearing: 180, heading: heading, distance: 5000))
+    }
+    
+    func testFOVAtDifferentHeadings() {
+        // Heading East (90°)
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 90, heading: 90, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 112.4, heading: 90, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 67.6, heading: 90, distance: 5000))
+        XCTAssertFalse(positioner.shouldDisplay(bearing: 0, heading: 90, distance: 5000))
+    }
+    
+    // MARK: - Horizontal Position Tests
+    
+    func testNormalizedPositionCentered() {
+        // POI directly ahead
+        let position = positioner.calculateNormalizedPosition(bearing: 0, heading: 0, distance: 5000)
+        
+        // Should be centered horizontally (x = 0.5)
+        XCTAssertEqual(position.x, 0.5, accuracy: 0.01)
+    }
+    
+    func testNormalizedPositionLeft() {
+        // POI 22.5° to the left (bearing is less than heading)
+        let position = positioner.calculateNormalizedPosition(bearing: 337.5, heading: 0, distance: 5000)
+        
+        // Should be left of center
+        XCTAssertLessThan(position.x, 0.5)
+    }
+    
+    func testNormalizedPositionRight() {
+        // POI 22.5° to the right
+        let position = positioner.calculateNormalizedPosition(bearing: 22.5, heading: 0, distance: 5000)
+        
+        // Should be right of center
+        XCTAssertGreaterThan(position.x, 0.5)
+    }
+    
+    func testNormalizedPositionBounds() {
+        // Test various positions stay within bounds
+        for bearing in stride(from: 0.0, through: 360.0, by: 45.0) {
+            let position = positioner.calculateNormalizedPosition(bearing: bearing, heading: 0, distance: 5000)
+            
+            XCTAssertGreaterThanOrEqual(position.x, 0.0)
+            XCTAssertLessThanOrEqual(position.x, 1.0)
+            XCTAssertGreaterThanOrEqual(position.y, 0.0)
+            XCTAssertLessThanOrEqual(position.y, 1.0)
+        }
+    }
+    
+    // MARK: - Vertical Position Tests
+    
+    func testVerticalPositionCloseDistance() {
+        // Close POI should be lower (higher Y value)
+        let position = positioner.calculateNormalizedPosition(bearing: 0, heading: 0, distance: 500)
+        XCTAssertGreater(position.y, 0.5)
+    }
+    
+    func testVerticalPositionFarDistance() {
+        // Far POI should be higher (lower Y value)
+        let position = positioner.calculateNormalizedPosition(bearing: 0, heading: 0, distance: 40000)
+        XCTAssertLess(position.y, 0.5)
+    }
+    
+    func testVerticalPositionMiddleDistance() {
+        // Middle distance should be in the middle
+        let closePosition = positioner.calculateNormalizedPosition(bearing: 0, heading: 0, distance: 5000)
+        let midPosition = positioner.calculateNormalizedPosition(bearing: 0, heading: 0, distance: 25000)
+        let farPosition = positioner.calculateNormalizedPosition(bearing: 0, heading: 0, distance: 45000)
+        
+        XCTAssertGreater(closePosition.y, midPosition.y)
+        XCTAssertGreater(midPosition.y, farPosition.y)
+    }
+    
+    // MARK: - Screen Position Tests
+    
+    func testScreenPositionCenter() {
+        let screenPosition = positioner.calculateScreenPosition(bearing: 0, heading: 0, distance: 25000)
+        
+        // Should be near screen center
+        XCTAssertEqual(screenPosition.x, positioner.screenCenter.x, accuracy: 1)
+    }
+    
+    func testScreenPositionRange() {
+        // Test various positions to ensure they're on screen
+        for bearing in stride(from: 0.0, through: 360.0, by: 30.0) {
+            let position = positioner.calculateScreenPosition(bearing: bearing, heading: 0, distance: 5000)
+            
+            // Should be within reasonable screen bounds (with some margin for clipping)
+            XCTAssertGreaterThan(position.x, -50)
+            XCTAssertLessThan(position.x, positioner.screenWidth + 50)
+            XCTAssertGreaterThan(position.y, -50)
+            XCTAssertLessThan(position.y, positioner.screenHeight + 50)
+        }
+    }
+    
+    // MARK: - Font Size Tests
+    
+    func testFontSizeCloserIsLarger() {
+        let closeSize = positioner.calculateFontSize(for: 500)
+        let farSize = positioner.calculateFontSize(for: 45000)
+        
+        XCTAssertGreater(closeSize, farSize)
+    }
+    
+    func testFontSizeRange() {
+        let minSize = positioner.calculateFontSize(for: 50000) // Beyond max distance
+        let maxSize = positioner.calculateFontSize(for: 100) // Within range
+        
+        XCTAssertGreaterThanOrEqual(maxSize, 24)
+        XCTAssertLessThanOrEqual(minSize, 10)
+    }
+    
+    func testFontSizeClamped() {
+        // Test that font size stays within expected range
+        for distance in [100, 5000, 25000, 45000, 50000] {
+            let size = positioner.calculateFontSize(for: Double(distance))
+            XCTAssertGreaterThanOrEqual(size, 10)
+            XCTAssertLessThanOrEqual(size, 24)
+        }
+    }
+    
+    // MARK: - Opacity Tests
+    
+    func testOpacityAtCenter() {
+        // POI directly ahead should have full opacity
+        let opacity = positioner.calculateOpacity(bearing: 0, heading: 0)
+        XCTAssertEqual(opacity, 1.0)
+    }
+    
+    func testOpacityAtFOVEdge() {
+        // POI at FOV edge should start fading
+        let opacity = positioner.calculateOpacity(bearing: 22.4, heading: 0)
+        XCTAssertGreater(opacity, 0.0)
+        XCTAssertLess(opacity, 1.0)
+    }
+    
+    func testOpacityOutsideFOV() {
+        // POI outside FOV should have zero opacity
+        let opacity = positioner.calculateOpacity(bearing: 45, heading: 0)
+        XCTAssertEqual(opacity, 0.0)
+    }
+    
+    func testOpacityFadeZone() {
+        // Opacity should gradually decrease at FOV edges
+        let center = positioner.calculateOpacity(bearing: 0, heading: 0)
+        let nearEdge = positioner.calculateOpacity(bearing: 20, heading: 0)
+        let atEdge = positioner.calculateOpacity(bearing: 22.5, heading: 0)
+        
+        XCTAssertGreater(center, nearEdge)
+        XCTAssertGreater(nearEdge, atEdge)
+    }
+    
+    // MARK: - Clipping Scale Tests
+    
+    func testClippingScaleFullyVisible() {
+        // POI well within FOV
+        let scale = positioner.calculateClippingScale(bearing: 0, heading: 0)
+        XCTAssertEqual(scale, 1.0)
+    }
+    
+    func testClippingScalePartiallyClipped() {
+        // POI partially outside FOV
+        let scale = positioner.calculateClippingScale(bearing: 30, heading: 0)
+        XCTAssertGreater(scale, 0.0)
+        XCTAssertLess(scale, 1.0)
+    }
+    
+    func testClippingScaleFullyClipped() {
+        // POI fully outside FOV
+        let scale = positioner.calculateClippingScale(bearing: 50, heading: 0)
+        XCTAssertEqual(scale, 0.0)
+    }
+    
+    // MARK: - Bearing Difference Tests
+    
+    func testNormalizationNorthward() {
+        // Test bearing calculations with northward heading
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: 0, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 22, heading: 0, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 338, heading: 0, distance: 5000))
+    }
+    
+    func testNormalizationWrapAround() {
+        // Test bearing wrap-around at 0/360°
+        // Heading = 355°, bearing = 5° should be 10° offset (well within FOV)
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 5, heading: 355, distance: 5000))
+        
+        // Heading = 5°, bearing = 355° should be -10° offset (well within FOV)
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 355, heading: 5, distance: 5000))
+    }
+    
+    // MARK: - Real-world Scenario Tests
+    
+    func testMultiplePOIPositions() {
+        let center = positioner.calculateScreenPosition(bearing: 0, heading: 0, distance: 5000)
+        let left = positioner.calculateScreenPosition(bearing: 315, heading: 0, distance: 5000)
+        let right = positioner.calculateScreenPosition(bearing: 45, heading: 0, distance: 5000)
+        let close = positioner.calculateScreenPosition(bearing: 0, heading: 0, distance: 500)
+        let far = positioner.calculateScreenPosition(bearing: 0, heading: 0, distance: 40000)
+        
+        // Left POI should have lower X than center
+        XCTAssertLess(left.x, center.x)
+        
+        // Right POI should have higher X than center
+        XCTAssertGreater(right.x, center.x)
+        
+        // Close POI should be lower (higher Y) than far POI
+        XCTAssertGreater(close.y, far.y)
+    }
+    
+    func testDeviceRotation() {
+        // Test that labels move correctly as device rotates
+        let bearing = 45.0
+        let distance = 5000.0
+        
+        let position0 = positioner.calculateScreenPosition(bearing: bearing, heading: 0, distance: distance)
+        let position90 = positioner.calculateScreenPosition(bearing: bearing, heading: 90, distance: distance)
+        let position180 = positioner.calculateScreenPosition(bearing: bearing, heading: 180, distance: distance)
+        
+        // Positions should be different as heading changes
+        XCTAssertNotEqual(position0.x, position90.x)
+        XCTAssertNotEqual(position90.x, position180.x)
+    }
+    
+    func testSmoothScaling() {
+        // Test that font size changes smoothly with distance
+        let sizes = (100...45000).stride(by: 5000).map { distance in
+            positioner.calculateFontSize(for: Double(distance))
+        }
+        
+        // Each size should be >= the previous (as distance increases, size decreases)
+        for i in 1..<sizes.count {
+            XCTAssertLessThanOrEqual(sizes[i], sizes[i-1])
+        }
+    }
+}
+
+// MARK: - AROverlayView Tests
+
+class AROverlayViewTests: XCTestCase {
+    func testAROverlayViewCreation() {
+        let poi = POILocation(
+            name: "Museum",
+            coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0),
+            category: .museum,
+            distance: 5000,
+            bearing: 45
+        )
+        
+        let view = AROverlayView(pois: [poi], heading: 0.0)
+        XCTAssertNotNil(view)
+    }
+    
+    func testAROverlayViewMultiplePOIs() {
+        let pois = [
+            POILocation(name: "Museum", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .museum, distance: 5000, bearing: 45),
+            POILocation(name: "Park", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .park, distance: 2000, bearing: 0),
+            POILocation(name: "Airport", coordinate: CLLocationCoordinate2D(latitude: 41.9, longitude: -82.9), category: .airport, distance: 10000, bearing: 90),
+        ]
+        
+        let view = AROverlayView(pois: pois, heading: 0.0)
+        XCTAssertNotNil(view)
+    }
+    
+    func testAROverlayViewWithoutHeading() {
+        let poi = POILocation(
+            name: "Museum",
+            coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0),
+            category: .museum,
+            distance: 5000,
+            bearing: 45
+        )
+        
+        let view = AROverlayView(pois: [poi], heading: nil)
+        XCTAssertNotNil(view)
+    }
+    
+    func testAROverlayViewEmptyPOIs() {
+        let view = AROverlayView(pois: [], heading: 0.0)
+        XCTAssertNotNil(view)
+    }
+    
+    func testPOILabelViewCreation() {
+        let poi = POILocation(
+            name: "Museum",
+            coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0),
+            category: .museum,
+            distance: 5000,
+            bearing: 45
+        )
+        let positioner = ARLabelPositioner(screenWidth: 390, screenHeight: 844)
+        
+        let view = POILabelView(poi: poi, heading: 0.0, positioner: positioner)
+        XCTAssertNotNil(view)
+    }
+}
+
+// MARK: - Integration Tests for AR
+
+class ARIntegrationTests: XCTestCase {
+    var positioner: ARLabelPositioner!
+    
+    override func setUp() {
+        super.setUp()
+        positioner = ARLabelPositioner(screenWidth: 390, screenHeight: 844)
+    }
+    
+    override func tearDown() {
+        positioner = nil
+        super.tearDown()
+    }
+    
+    func testCompleteWorkflowSinglePOI() {
+        let poi = POILocation(
+            name: "Museum",
+            coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0),
+            category: .museum,
+            distance: 5000,
+            bearing: 45,
+            prominence: 0.8
+        )
+        
+        let heading = 0.0
+        
+        // Should be displayed
+        XCTAssertTrue(positioner.shouldDisplay(bearing: poi.bearing, heading: heading, distance: poi.distance))
+        
+        // Should have position
+        let position = positioner.calculateScreenPosition(bearing: poi.bearing, heading: heading, distance: poi.distance)
+        XCTAssertGreaterThan(position.x, 0)
+        XCTAssertGreaterThan(position.y, 0)
+        
+        // Should have font size
+        let fontSize = positioner.calculateFontSize(for: poi.distance)
+        XCTAssertGreater(fontSize, 10)
+        
+        // Should have opacity
+        let opacity = positioner.calculateOpacity(bearing: poi.bearing, heading: heading)
+        XCTAssertGreater(opacity, 0)
+    }
+    
+    func testWorkflowMultiplePOIsVariousDistances() {
+        let heading = 45.0
+        let pois = [
+            POILocation(name: "Close POI", coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0), category: .landmark, distance: 500, bearing: 45),
+            POILocation(name: "Mid POI", coordinate: CLLocationCoordinate2D(latitude: 42.1, longitude: -83.1), category: .museum, distance: 5000, bearing: 30),
+            POILocation(name: "Far POI", coordinate: CLLocationCoordinate2D(latitude: 41.9, longitude: -82.9), category: .park, distance: 40000, bearing: 60),
+        ]
+        
+        var fontSizes: [CGFloat] = []
+        for poi in pois {
+            if positioner.shouldDisplay(bearing: poi.bearing, heading: heading, distance: poi.distance) {
+                let fontSize = positioner.calculateFontSize(for: poi.distance)
+                fontSizes.append(fontSize)
+            }
+        }
+        
+        // Font sizes should decrease as distance increases
+        XCTAssertGreater(fontSizes[0], fontSizes[1])
+        XCTAssertGreater(fontSizes[1], fontSizes[2])
+    }
+    
+    func testDeviceRotationWorkflow() {
+        let poi = POILocation(
+            name: "Museum",
+            coordinate: CLLocationCoordinate2D(latitude: 42.0, longitude: -83.0),
+            category: .museum,
+            distance: 5000,
+            bearing: 45
+        )
+        
+        // Test visibility at different headings
+        let heading0Visible = positioner.shouldDisplay(bearing: poi.bearing, heading: 0, distance: poi.distance)
+        let heading90Visible = positioner.shouldDisplay(bearing: poi.bearing, heading: 90, distance: poi.distance)
+        let heading180Visible = positioner.shouldDisplay(bearing: poi.bearing, heading: 180, distance: poi.distance)
+        
+        // POI at bearing 45 should be visible with heading near 45, not with heading 180
+        XCTAssertTrue(heading0Visible) // Within 45° of bearing 45
+        XCTAssertFalse(heading180Visible) // Far from bearing 45
+    }
+    
+    func testEdgeCaseZeroBearing() {
+        // POI directly north
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: 0, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: 22, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 0, heading: 338, distance: 5000))
+    }
+    
+    func testEdgeCaseWraparound() {
+        // Test bearing wrapping at 360°
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 359, heading: 1, distance: 5000))
+        XCTAssertTrue(positioner.shouldDisplay(bearing: 1, heading: 359, distance: 5000))
+    }
+}
