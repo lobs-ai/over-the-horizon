@@ -1,54 +1,55 @@
-# Diagnostic Review: Apple Maps POI Search + Location Data Model
+# Diagnostic Review — Apple Maps POI Search + Location Data Model
 
 **Task ID:** `313AC40E-E9AB-4621-B967-93BA7D106B4A`  
-**Date:** 2026-03-02  
-**Reviewer:** Reviewer Agent
+**Date:** 2026-03-02
 
 ---
 
-## Root Cause of Failure
+## Root Cause of Failures
 
-**"Session not found"** — This is an **orchestrator/agent infrastructure error**, not a code error. The programmer agent's session expired or was lost between retries. The code was successfully written despite the reported failures.
+**The task actually succeeded.** All required code is present:
 
-The task was **completed** — all required files exist:
-- `LocationCategory.swift` ✅
-- `POILocation.swift` ✅
-- `POISearchManager.swift` ✅
+- `LocationCategory.swift` — Full enum with all 25 categories, no restaurants/food
+- `POILocation.swift` — Data model with name, coordinate, category, distance, bearing, prominence
+- `POISearchManager.swift` — MKLocalSearch integration, configurable radius, periodic re-search on movement
+
+The "Session not found" error is an **orchestration infrastructure error** — the programmer agent completed the work but the session tracking it died (timeout/crash), so the orchestrator never received the success signal and retried unnecessarily.
 
 ---
 
-## Code Review Findings
+## Code Quality
 
-### 🟡 mkCategory mappings defined but never used
-`LocationCategory.mkCategory` is properly mapped to `MKPointOfInterestCategory` but `POISearchManager` uses `naturalLanguageQuery` strings instead of `MKLocalPointOfInterestFilter`. This means food/restaurant exclusion is NOT enforced at the API level — it relies on the query string being non-food, which is fragile.
+### Good ✅
+- `LocationCategory.mkCategory` mapping handles Apple API gaps reasonably
+- Bearing math (atan2 spherical) is correct
+- searchRadiusMiles clamped to 1-5 mi
+- Proper @Published / ObservableObject pattern
 
-**Fix:** Use `MKLocalPointOfInterestFilter(including:)` with the mapped categories instead of natural language queries.
+### Issues Found
 
-### 🟡 25 API calls per search cycle
-One `MKLocalSearch` per category × 25 categories = 25 simultaneous search calls every 30 seconds (or on movement). This will be slow and may hit Apple Maps rate limits.
+#### 🟡 25 sequential MKLocalSearch calls (one per category)
+`searchCategory()` fires 25 separate NL queries. Rate-limit risk, very slow.
+**Fix:** Use `MKLocalPointOfInterestFilter(including:)` with `pointOfInterestFilter` on the request — batch into 1-2 searches.
 
-**Fix:** Batch into a single `MKLocalPointOfInterestFilter` search covering all desired categories at once.
+#### 🟡 naturalLanguageQuery used instead of category filter
+The `mkCategory` mappings on `LocationCategory` exist but are unused. NL queries for "viewpoint", "ferry terminal" etc. are unreliable.
+**Fix:** Switch to filter-based search using the existing `mkCategory` mappings.
 
-### 🟡 Initial search silently fails if location not yet available
-`setupPeriodicSearch()` fires `searchPOIs()` immediately in `init`. If the location manager hasn't gotten a fix yet (common on cold start), the search silently fails with "User location not available" and waits 30s for the timer to retry.
-
-**Fix:** Observe `locationManager.userLocation` and trigger the first search when a fix arrives.
-
-### ✅ What's good
-- Bearing calculation is correct (standard great-circle formula)
-- Distance calc uses `CLLocation.distance(from:)` — correct
-- `prominence` clamped to 0.0–1.0
-- `searchRadiusMiles` clamped to 1–5
-- Movement threshold (500m) before re-search is reasonable
-- `@available(iOS 17.0, *)` guard on `mkCategory`
-- All required categories present, no food categories
+#### 🔵 No deduplication
+Same POI can appear across multiple category searches. No coordinate+name dedup.
 
 ---
 
 ## Recommendation
 
-**Mark task DONE.** The failure was infrastructure (session timeout), not a code failure. The implementation meets the spec.
+**The original task is DONE. Do not retry it.**
 
-Create a follow-up programmer task to:
-1. Replace natural language queries with `MKLocalPointOfInterestFilter` (fixes food exclusion + batches to 1 API call)
-2. Trigger first search on location fix, not just timer
+Mark it complete. Create a follow-up task for search efficiency.
+
+---
+
+## Handoff (for programmer)
+
+Fix POISearchManager to use MKLocalPointOfInterestFilter instead of 25 NL queries.
+Use the existing `mkCategory` mappings. Add deduplication by coordinate+name.
+Files: POISearchManager.swift, LocationCategory.swift
