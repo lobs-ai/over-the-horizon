@@ -2,69 +2,110 @@
 
 **Reviewer:** Reviewer Agent  
 **Date:** 2026-03-02  
-**Scope:** Full codebase — spec compliance, Swift quality, performance, edge cases, UX, privacy
+**Scope:** Full codebase review — correctness, Swift practices, performance, edge cases, UX, privacy, tests
 
 ---
 
 ## Summary
 
-The app's architecture is clean and well-organized. Separation of concerns across CameraManager, LocationManager, MotionManager, POISearchManager, ZoomGestureManager, and SettingsManager is solid. Test coverage for pure logic is extensive. However, there's one **critical correctness bug** in heading calculation that would make the entire AR overlay wrong in practice, plus a **test compilation failure** blocking the test suite.
+Clean architecture and solid separation of concerns. Good POI scoring logic, bearing math, and business logic test coverage. However there are **two critical bugs** that break core functionality, plus several important issues.
 
 ---
 
 ## 🔴 Critical
 
-### 1. MotionManager heading is wrong — labels will point in wrong directions
+### 1. Heading is not a compass heading — AR labels will point in wrong directions
 
-**File:** `MotionManager.swift`, `calculateHeading(from:)`
+**File:** `MotionManager.swift` — `calculateHeading(from:)`
 
 ```swift
 let heading = (yaw * 180.0 / Double.pi) + 180.0
 ```
 
-`CMAttitude.yaw` is relative to the device's initial orientation when `startDeviceMotionUpdates` was called — not magnetic north. The call uses `startDeviceMotionUpdates(to:)` with no reference frame, defaulting to `CMAttitudeReferenceFrameXArbitraryZVertical` — an arbitrary reference, not compass-aligned.
+`CMAttitude.yaw` is rotation relative to an **arbitrary reference frame set at motion start** — NOT a compass heading. On every cold start, "north" is in a random direction. The AR overlay will render labels consistently pointing the wrong way.
 
-This means AR labels will only point correctly by coincidence (if the user faces the same direction as when the app started). The entire AR value proposition breaks.
+**Fix:** Use `CLLocationManager.startUpdatingHeading()` for compass-based heading, or use `CMMotionManager.startDeviceMotionUpdates(using: .xMagneticNorthZVertical)` which anchors yaw to magnetic north. The `CMAttitudeReferenceFrame.xMagneticNorthZVertical` reference frame is the correct choice for AR heading.
 
-**Fix:** Either pass `using: .xMagneticNorthZVertical` to `startDeviceMotionUpdates`, or (better) get heading from `CLLocationManager.startUpdatingHeading()` and use CoreMotion only for smoothing/tilt correction. The `LocationManager` already exists and should be extended for heading.
+This is the most important bug. Nothing else renders correctly without it.
 
-Also: `private let locationManager = CoreMotion.CMHeadingFilterValueDefault` is a dead, misleading property (it's a float constant named "locationManager"). Remove it.
+---
 
-### 2. Test compilation failure — AROverlayViewTests and POILabelView tests use outdated init signatures
+### 2. AROverlayView and POILabelView tests missing required parameters — won't compile
 
-**File:** `OverTheHorizonTests.swift`
+**File:** `OverTheHorizonTests.swift` — `AROverlayViewTests`
 
 ```swift
-// Won't compile — missing zoomGestureManager parameter
+// Missing zoomGestureManager: ZoomGestureManager
 let view = AROverlayView(pois: [poi], heading: 0.0)
 
-// Won't compile — missing adjustedPosition and zIndex parameters  
+// Missing adjustedPosition: CGPoint, zIndex: Int
 let view = POILabelView(poi: poi, heading: 0.0, positioner: positioner)
 ```
 
-Current `AROverlayView` requires `zoomGestureManager: ZoomGestureManager`. Current `POILabelView` requires `adjustedPosition: CGPoint` and `zIndex: Int`. Tests haven't been updated. This blocks the entire test suite from compiling.
+These tests would not compile, silently eliminating AR overlay test coverage. Fix:
+```swift
+let view = AROverlayView(pois: [poi], heading: 0.0, zoomGestureManager: ZoomGestureManager())
+let view = POILabelView(poi: poi, heading: 0.0, positioner: positioner,
+                        adjustedPosition: CGPoint(x: 195, y: 422), zIndex: 0)
+```
 
 ---
 
 ## 🟡 Important
 
-### 3. ContentView init creates redundant objects
+### 3. MKLocalSearch ignores MKPointOfInterestCategory — unreliable results
+
+**File:** `POISearchManager.swift` — `searchCategory()`
+
+The code defines a full `mkCategory` mapping in `LocationCategory.swift` but never uses it. Instead it queries by free text (`naturalLanguageQuery = category.rawValue`). Queries like "viewpoint", "ferry terminal", "historic site" return inconsistent results. The `pointOfInterestFilter` API exists specifically for this:
+
+```swift
+if #available(iOS 14.0, *) {
+    searchRequest.pointOfInterestFilter = MKPointOfInterestFilter(including: [category.mkCategory])
+}
+```
+
+Categories like `ferryTerminal` (mapped to `.park`) will return wrong results either way — the mkCategory mappings need an audit too.
+
+---
+
+### 4. ContentView double-initializes @StateObject — leaks instances
 
 **File:** `ContentView.swift`
 
-Property declarations like `@StateObject private var cameraManager = CameraManager()` are evaluated before `init()` runs, creating objects that are immediately discarded when `init()` re-assigns them. Five StateObjects are created twice on every ContentView initialization. Use typed declarations without initializers for properties overridden in `init()`:
-
 ```swift
-@StateObject private var cameraManager: CameraManager  // no = CameraManager()
+@StateObject private var locationManager = LocationManager()  // Creates instance #1
+
+init() {
+    let locationMgr = LocationManager()                         // Creates instance #2
+    _locationManager = StateObject(wrappedValue: locationMgr)  // Discards instance #1
+    ...
+}
 ```
 
-### 4. Privacy — unnecessary NSLocationAlwaysAndWhenInUseUsageDescription key
+All five `@StateObject` properties have this pattern. Remove the default initializers on the property declarations when providing a custom `init()`.
+
+---
+
+### 5. setupPeriodicSearch() called twice on launch — 48 MapKit requests fire immediately
+
+**File:** `POISearchManager.swift`
+
+`init()` calls `setupPeriodicSearch()` which starts a timer and fires an immediate `searchPOIs()`. Then `ContentView.onAppear` calls `startPeriodicSearch()` → `setupPeriodicSearch()` again, cancels the first timer, and fires another immediate `searchPOIs()`. Result: 24 MKLocalSearch requests × 2 = 48 search requests on every launch.
+
+**Fix:** Remove `setupPeriodicSearch()` from `init()`. Let `startPeriodicSearch()` handle setup entirely. Fire a single initial search from `onAppear` if needed.
+
+---
+
+### 6. NSLocationAlwaysAndWhenInUseUsageDescription present but app never requests Always
 
 **File:** `Info.plist`
 
-The app only calls `requestWhenInUseAuthorization()`. Including `NSLocationAlwaysAndWhenInUseUsageDescription` without ever requesting always-on access violates App Store review guidelines and may cause rejection. Remove the key.
+`LocationManager` only calls `requestWhenInUseAuthorization()` but the plist declares `NSLocationAlwaysAndWhenInUseUsageDescription`. App Store review may flag this. Remove the Always key.
 
-### 5. OverlapResolver uses fixed 60pt label width — long names will still overlap
+---
+
+### 7. Overlap resolver uses fixed 60pt label width — misses real overlaps
 
 **File:** `OverlapResolver.swift`
 
@@ -72,60 +113,67 @@ The app only calls `requestWhenInUseAuthorization()`. Including `NSLocationAlway
 private let minLabelWidth: CGFloat = 60.0
 ```
 
-"Philadelphia Museum of Art" is treated as 60pt wide, same as "Zoo". In urban areas with long venue names, overlap detection fails. Estimate width from name length (e.g., `max(60, name.count * 8)`) or use a conservative fixed value of 150–200pt.
-
-### 6. Zoom debug label has wrong unit
-
-**File:** `ContentView.swift`
-
-```swift
-Text(String(format: "Zoom: %.2f (%.0f - %.0fm)", 
-    zoomGestureManager.zoomLevel,
-    zoomGestureManager.minDistance,
-    zoomGestureManager.maxDistance / 1000))  // divided by 1000 but label says "m"
-```
-
-The max distance is divided by 1000 (yielding km) but the format string says `m`. At default zoom, this shows "100 - 50m" when it should show "100m - 50km".
+Long names ("Philadelphia Museum of Art") render at 200+ points but overlap detection treats all labels as 60×24pt. Two wide labels side-by-side won't be detected as overlapping. Increase the estimate (e.g., 150pt) or pass actual rendered size.
 
 ---
 
 ## 🔵 Suggestions
 
-### 7. POISearchManager fires initial search before location is available
+### 8. Redundant main queue dispatch in MotionManager
 
-`setupPeriodicSearch()` called from `init()` immediately dispatches `searchPOIs()`. This always fails with "User location not available" on launch (location permission hasn't been granted yet). The error flashes in the UI briefly. Consider waiting for first non-nil location before initiating the first search.
+`startDeviceMotionUpdates(to: .main)` already runs callbacks on main. The inner `DispatchQueue.main.async { self?.heading = heading }` is redundant. Remove the wrapper.
 
-### 8. CameraPreviewView uses deprecated UIScreen.main.bounds (iOS 16+)
+### 9. Confusing unused constant in MotionManager
 
-Use `.zero` for the initial frame instead.
+```swift
+private let locationManager = CoreMotion.CMHeadingFilterValueDefault
+```
 
-### 9. POILabelView performs redundant shouldShowPOI() check
+Named `locationManager` but stores a Float constant. Never used. Delete it.
 
-`displayedPOIs` in `AROverlayView` already filters by `shouldDisplay()`. `POILabelView.shouldShowPOI()` repeats the check unnecessarily. Remove it.
+### 10. Zoom display format bug
 
-### 10. Optimal scoring distance at 25km feels off
+```swift
+Text(String(format: "Zoom: %.2f (%.0f - %.0fm)",
+    zoomGestureManager.zoomLevel,
+    zoomGestureManager.minDistance,
+    zoomGestureManager.maxDistance / 1000))  // divides to km but label says "m"
+```
 
-`POIScorer.optimalDistance` is the midpoint of 100m–50km, i.e., 25km. POIs ~25km away score highest on the distance dimension. Most users want prominent *nearby* landmarks. Consider an optimal around 2–5km with a longer falloff tail.
+At default zoom this shows "100 - 50m" when it should be "100m - 50km". Fix the unit label.
+
+### 11. Settings dismissal triggers search even if nothing changed
+
+`SettingsView.onDisappear` fires a full re-search every dismiss regardless of whether categories changed. Track a `didChange` flag in `SettingsManager` and only search when needed.
+
+### 12. POIScorer.clamp shadows stdlib min/max — correctness trap
+
+```swift
+private static func clamp(_ value: Double, min: Double, max: Double) -> Double {
+    return max(min, min(value, max))  // parameter `max` shadows stdlib max()
+}
+```
+
+Works coincidentally today but is a readability/maintenance hazard. Rename parameters to `minVal`/`maxVal` or use explicit `Swift.max`/`Swift.min`.
 
 ---
 
 ## What's Done Well
 
-- **Architecture is clean** — each manager has one responsibility, no god objects
-- **Bearing normalization** is correct at the 0/360 wrap-around boundary in all relevant places
-- **Test coverage is extensive** for pure logic (ARLabelPositioner, POIScorer, ZoomGestureManager, OverlapResolver, SettingsManager) — well above typical
-- **Privacy is minimal** — camera, location, motion only; no external analytics or third-party SDKs
-- **Settings persistence** via UserDefaults is clean and correct
-- **Zoom gesture handling** uses proper incremental delta pattern, correctly converting cumulative gesture scale to per-frame deltas
-- **POIScorer weights** (category 35%, distance 25%, prominence 25%, directional 15%) are reasonable for an AR POI display
+- **Architecture**: Clean SRP separation across LocationManager, MotionManager, POISearchManager, ARLabelPositioner, OverlapResolver. Independently testable.
+- **POI Scoring**: Weighted multi-factor scoring (category, distance, prominence, directional centrality) is well-designed. Math is correct.
+- **Bearing normalization**: `normalizeBearingDifference` is correctly implemented and consistently used throughout.
+- **Zoom gesture**: The incremental delta calculation (`scaleDelta = value / lastMagnificationScale`) correctly handles cumulative `MagnificationGesture` values. Good implementation.
+- **Privacy**: No external network calls, no analytics, permissions properly declared (minus the Always location nit above).
+- **Business logic test coverage**: ARLabelPositioner, ZoomGestureManager, POIScorer, OverlapResolver, SettingsManager all have thorough tests with good edge cases.
 
 ---
 
-## Priority File List
+## Priority Fix Order
 
-1. `MotionManager.swift` — 🔴 heading bug
-2. `OverTheHorizonTests.swift` — 🔴 compile failures  
-3. `ContentView.swift` — 🟡 duplicate init allocations
-4. `Info.plist` — 🟡 remove always-location key
-5. `OverlapResolver.swift` — 🟡 fixed label width
-6. `ContentView.swift` — 🔵 zoom label unit bug
+1. Fix heading calculation (use magnetic north reference frame) — **app is non-functional without this**
+2. Fix AROverlayView/POILabelView tests (compilation failure, no AR test coverage)
+3. Use MKPointOfInterestCategory in search (reliability)
+4. Fix double-init and double-search-on-launch (performance/battery)
+5. Remove unnecessary Always location key from plist (App Store risk)
+6. Improve overlap resolver label width estimate (UX in dense areas)
